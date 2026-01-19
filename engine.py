@@ -72,6 +72,12 @@ def pre_clean_html(raw_html: str) -> str:
 
 
 # --- Modelos ---
+class ScrapingScope(str, Enum):
+    STRICT = "strict"  # Solo lo que empiece por la URL base (Ideal Docs/Blogs)
+    BROAD = "broad"  # Todo el dominio (Ideal Sitios Corporativos)
+    SMART = "smart"  # Decisión automática basada en profundidad
+
+
 class MigrationStatus(str, Enum):
     PENDING = "pending"
     COMPLETED = "completed"
@@ -226,6 +232,7 @@ class StateManager:
 # --- Configuración Dinámica ---
 class ScrapingPolicy(BaseModel):
     url: str
+    scope: ScrapingScope = ScrapingScope.SMART
     max_workers: int = 5
     only_text: bool = False
     only_images: bool = False
@@ -234,10 +241,11 @@ class ScrapingPolicy(BaseModel):
 
     @classmethod
     def create_simple(
-        cls, url: str, workers: int, text: bool, images: bool, docs: bool
+        cls, url: str, workers: int, text: bool, images: bool, docs: bool, scope: str
     ) -> "ScrapingPolicy":
         return cls(
             url=url,
+            scope=ScrapingScope(scope),
             max_workers=workers,
             only_text=text,
             only_images=images,
@@ -516,6 +524,36 @@ class ArgeliaMigrationEngine:
                 if parsed_link.netloc != self.domain:
                     continue
 
+                # --- 🛡️ CONTROL DE ALCANCE (SCOPE CONTROL) ---
+                should_follow = False
+
+                if self.policy.scope == ScrapingScope.BROAD:
+                    # Modo "Todo el sitio": Si es el mismo dominio, entra.
+                    should_follow = True
+
+                elif self.policy.scope == ScrapingScope.STRICT:
+                    # Modo "Carpeta": Solo si empieza con la URL base.
+                    if full_url.startswith(self.base_url):
+                        should_follow = True
+
+                elif self.policy.scope == ScrapingScope.SMART:
+                    # Modo "Inteligente":
+                    # Si la URL base es profunda (ej: /en/latest/), actúa como STRICT.
+                    # Si la URL base es la raíz (ej: .com/), actúa como BROAD.
+                    path_parts = urlparse(self.base_url).path.strip("/").split("/")
+                    path_depth = len([p for p in path_parts if p])
+                    is_deep_start = path_depth >= 1
+
+                    if is_deep_start:
+                        if full_url.startswith(self.base_url):
+                            should_follow = True
+                    else:
+                        should_follow = True
+
+                if not should_follow:
+                    continue
+                # ---------------------------------------------
+
                 is_asset = any(
                     full_url.lower().endswith(ext)
                     for ext in [
@@ -745,6 +783,32 @@ async def main() -> None:
             console.print("[bold red]Error: Se requiere una URL para continuar.[/]")
             return
 
+        scope_choice = await questionary.select(
+            "¿Cómo debe comportarse el motor de navegación?",
+            choices=[
+                questionary.Choice(
+                    "🧠 Auto (Recomendado)",
+                    value="smart",
+                    description="Detecta automáticamente si es un sub-sitio o un portal completo.",
+                ),
+                questionary.Choice(
+                    "🎯 Estricto (Solo esta sección)",
+                    value="strict",
+                    description=f"Solo descargará enlaces que empiecen por: {url}",
+                ),
+                questionary.Choice(
+                    "🌍 Global (Todo el dominio)",
+                    value="broad",
+                    description="Descargará cualquier enlace dentro del dominio, sin importar la carpeta.",
+                ),
+            ],
+            style=custom_style,
+            instruction="(Usa flechas para elegir la estrategia)",
+        ).ask_async()
+
+        if not scope_choice:
+            return
+
         choices = await questionary.checkbox(
             "¿Qué elementos deseas extraer?",
             choices=[
@@ -793,12 +857,19 @@ async def main() -> None:
             text="text" in choices,
             images="images" in choices,
             docs="docs" in choices,
+            scope=scope_choice,
         )
 
     else:
         # Modo CLI tradicional para automatización
         parser = argparse.ArgumentParser(description="Multi-site Scraper de Élite")
         parser.add_argument("url", help="URL base del sitio a procesar")
+        parser.add_argument(
+            "--scope",
+            choices=["smart", "strict", "broad"],
+            default="smart",
+            help="Define el alcance de la navegación",
+        )
         parser.add_argument(
             "--workers", type=int, default=5, help="Número de workers concurrentes"
         )
@@ -822,6 +893,7 @@ async def main() -> None:
             text=args.only_text,
             images=args.only_images,
             docs=args.only_docs,
+            scope=args.scope,
         )
 
     engine = ArgeliaMigrationEngine(policy)

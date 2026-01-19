@@ -10,21 +10,23 @@ UIF es un motor de ingesta de conocimiento de alta fidelidad diseñado para tran
 
 ## 🛑 CAPACIDADES DE ÉLITE
 
-- **Ingesta Multimodal**: Conversión proactiva de `PDF`, `DOCX`, `XLSX` y `PPTX` a Markdown semántico utilizando el motor **Microsoft MarkItDown**.
-- **Aislamiento Multitenant**: Estructura de datos atomizada por dominio (`data/{domain}/`) para evitar colisiones en ingestas masivas.
-- **Resiliencia Industrial**: Gestión de estado mediante **SQLite en modo WAL** (Write-Ahead Logging), permitiendo concurrencia real sin bloqueos de base de datos.
-- **Poda Semántica**: Integración con **Scrapling** para extraer quirúrgicamente el contenido relevante (`main`, `article`), eliminando el 95% del ruido web (menús, footers).
-- **UX Conversacional**: Asistente interactivo (Wizard) para configuración rápida sin necesidad de memorizar flags.
+- **Ingesta Multimodal Híbrida**: Conversión de alta fidelidad para `PDF`, `DOCX`, `XLSX` y `PPTX` vía **MarkItDown**, y extracción semántica superior para HTML vía **Trafilatura**.
+- **Limpieza de "Grado Industrial"**: Pipeline de pre-poda con **Selectolax**, sanitización con **nh3** y normalización Unicode con **ftfy** para eliminar el 100% del ruido y el *mojibake*.
+- **Navegación Inteligente (Scope Control)**: Estrategias `SMART`, `STRICT` y `BROAD` para controlar con precisión quirúrgica el alcance del rastreo (evitando salir de sub-sitios o documentación específica).
+- **Contexto RAG Enriquecido**: Inyección automática de **YAML Frontmatter** (URL, autor, fecha, título) en cada archivo para facilitar la indexación en bases de datos vectoriales.
+- **Resiliencia Industrial**: Gestión de estado mediante **SQLite en modo WAL**, permitiendo concurrencia real y recuperación automática tras fallos.
+- **UX Conversacional**: Asistente interactivo (Wizard) para configuración guiada de alcance, procesos y tipos de contenido.
 
 ---
 
-## 🏗️ ARQUITECTURA TÉCNICA
+## 🏗️ ARQUITECTURA TÉCNICA (Pipeline v2.0)
 
-El motor opera en tres capas de refinamiento:
+El motor opera en cuatro capas de refinamiento:
 
-1. **Capa de Navegación (Scrapling)**: Orquestación de sesiones asíncronas con evasión de bloqueos e identificación semántica de contenedores.
-2. **Capa de Conversión (MarkItDown)**: Traducción de fragmentos HTML y documentos binarios a un estándar Markdown de alta calidad de Microsoft.
-3. **Capa de Auditoría (Polars)**: Procesamiento de resultados en tiempo real con análisis estadístico de fallos (HTTP 5xx, 4xx) para garantizar la integridad del 100% de la migración.
+1. **Capa de Navegación (Scrapling + Scope Logic)**: Orquestación asíncrona con evasión de bloqueos y filtrado de alcance inteligente basado en la profundidad de la URL semilla.
+2. **Capa de Purificación (Selectolax + nh3)**: Eliminación masiva de scripts, estilos y nodos irrelevantes en milisegundos, garantizando un HTML seguro y ligero.
+3. **Capa de Conversión Híbrida**: Selección dinámica del mejor motor: **Trafilatura** para bloques de texto semántico y **MarkItDown** para layouts complejos y activos binarios.
+4. **Capa de Refinamiento (ftfy + YAML)**: Normalización final del texto y enriquecimiento con metadatos estructurados para máxima compatibilidad con LLMs.
 
 ---
 
@@ -47,7 +49,7 @@ uv run engine.py
 ### Ejecución Automática (CLI)
 Para flujos de trabajo automatizados o scripts de shell:
 ```bash
-uv run engine.py https://ejemplo.com --workers 10 --only-text
+uv run engine.py https://ejemplo.com --workers 10 --scope smart --only-text
 ```
 
 ---

@@ -12,21 +12,24 @@
 - **Checkpointing**: Persistencia atómica en SQLite con modo **WAL (Write-Ahead Logging)** para permitir concurrencia masiva de lectura/escritura sin bloqueos.
 - **Namespacing**: Aislamiento total de datos por dominio (`data/{domain}/`).
 
-### Fase 2: Extracción Semántica Híbrida (The Signal Engine)
-- **Poda Quirúrgica**: Uso de `Scrapling` para localizar el núcleo de contenido (`main`, `article`, etc.) eliminando el 90% del ruido visual.
-- **Conversión de Alta Fidelidad**: Integración de **`MarkItDown` (Microsoft)** para transformar el residuo HTML y activos binarios en Markdown semántico.
-- **Fallback de Resiliencia**: Mecanismo de extracción de texto plano automático si el motor de conversión encuentra estructuras corruptas.
+### Fase 2: Purificación y Extracción Semántica Híbrida
+- **Pre-Poda Ultrarrápida**: Uso de `Selectolax` para eliminar el 60% del ruido HTML (scripts, ads, nav) antes de la conversión.
+- **Sanitización de Seguridad**: Integración de `nh3` para asegurar la neutralidad del contenido.
+- **Motor Híbrido**: Orquestación entre `Trafilatura` (excelencia semántica en blogs/noticias) y `MarkItDown` (fidelidad en documentos y tablas complejas).
+- **Normalización Post-Procesado**: Aplicación de `ftfy` para garantizar texto libre de mojibake y errores de codificación legacy.
+- **Contextualización**: Inyección de YAML Frontmatter para trazabilidad total del dato (URL, Sitename, Author, Date).
 
-### Fase 3: Asset Intelligence Pipeline
-- **Multimodalidad**: Conversión proactiva de PDFs, Word, Excel y PowerPoint a Markdown gemelo durante la descarga.
-- **Control de Flujo**: `Semaphore` dinámico y reintentos exponenciales para errores de infraestructura (HTTP 5xx).
-- **Políticas de Ingesta**: Filtrado configurable vía flags (`--only-text`, `--only-images`, `--only-docs`).
+### Fase 3: Navegación Inteligente y Asset Intelligence
+- **Control de Alcance (Scope)**: Estrategias de navegación granular (Smart, Strict, Broad) para evitar la explosión del crawling.
+- **Multimodalidad**: Conversión proactiva de PDFs, Word, Excel y PowerPoint a Markdown enriquecido.
+- **Control de Flujo**: Semáforos asíncronos y reintentos basados en el estado de la base de datos (Auto-healing).
 
 ## 3. Arsenal Tecnológico (The 2026 Stack)
 - **Runtime**: Python 3.12+ (Optimizado para `uv`).
-- **Core**: Scrapling (Navegación Stealthy).
-- **Conversion**: Microsoft MarkItDown + PDFMiner.six.
-- **Data Layer**: SQLite WAL (Estado), Pydantic V2 (Contratos), Polars (Auditoría e Inteligencia de Datos).
+- **Navegación**: Scrapling (Stealthy) + Scope Control Logic.
+- **Limpieza**: Selectolax + nh3 + ftfy.
+- **Conversión**: Trafilatura + Microsoft MarkItDown + PDFMiner.six.
+- **Data Layer**: SQLite WAL (Estado), Pydantic V2 (Contratos), Polars (Auditoría e Inteligencia de Datos), PyYAML.
 - **UX**: `Questionary` (Wizard Interactivo) + `Rich` (Visualización Industrial).
 
 ## 4. Estructura de Salida Dinámica
