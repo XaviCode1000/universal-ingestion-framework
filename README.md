@@ -19,14 +19,14 @@ UIF es un motor de ingesta de conocimiento de alta fidelidad diseñado para tran
 
 ---
 
-## 🏗️ ARQUITECTURA TÉCNICA (Pipeline v2.0)
+## 🏗️ ARQUITECTURA TÉCNICA (Pipeline v2.2 - The Signal Master)
 
 El motor opera en cuatro capas de refinamiento:
 
 1. **Capa de Navegación (Scrapling + Scope Logic)**: Orquestación asíncrona con evasión de bloqueos y filtrado de alcance inteligente basado en la profundidad de la URL semilla.
-2. **Capa de Purificación (Selectolax + nh3)**: Eliminación masiva de scripts, estilos y nodos irrelevantes en milisegundos, garantizando un HTML seguro y ligero.
-3. **Capa de Conversión Híbrida**: Selección dinámica del mejor motor: **Trafilatura** para bloques de texto semántico y **MarkItDown** para layouts complejos y activos binarios.
-4. **Capa de Refinamiento (ftfy + YAML)**: Normalización final del texto y enriquecimiento con metadatos estructurados para máxima compatibilidad con LLMs.
+2. **Capa de Purificación (Selectolax + Density Analysis)**: Eliminación masiva de ruido mediante selectores estáticos y un **Algoritmo de Densidad de Enlaces** que detecta y elimina menús/sidebars incluso en sitios no semánticos.
+3. **Capa de Conversión Híbrida**: Selección dinámica del mejor motor con **Estrategia de Título en Cascada** (Waterfall) para garantizar metadatos precisos, usando **Trafilatura** y **MarkItDown**.
+4. **Capa de Refinamiento (ftfy + YAML)**: Normalización final del texto (mojibake fix) y enriquecimiento con metadatos estructurados para máxima compatibilidad con sistemas RAG.
 
 ---
 

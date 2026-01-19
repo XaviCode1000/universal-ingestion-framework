@@ -12,12 +12,12 @@
 - **Checkpointing**: Persistencia atómica en SQLite con modo **WAL (Write-Ahead Logging)** para permitir concurrencia masiva de lectura/escritura sin bloqueos.
 - **Namespacing**: Aislamiento total de datos por dominio (`data/{domain}/`).
 
-### Fase 2: Purificación y Extracción Semántica Híbrida
-- **Pre-Poda Ultrarrápida**: Uso de `Selectolax` para eliminar el 60% del ruido HTML (scripts, ads, nav) antes de la conversión.
+### Fase 2: Purificación y Extracción Semántica Híbrida (The Signal Master)
+- **Poda por Densidad de Enlaces**: Algoritmo dinámico que detecta y elimina bloques de navegación (menús, sidebars) basándose en la relación texto/link, superando las limitaciones de sitios no semánticos.
+- **Detección de Título en Cascada**: Estrategia Waterfall (OG -> Title -> H1) ejecutada sobre el DOM original para evitar la contaminación de metadatos por footers o sidebars.
 - **Sanitización de Seguridad**: Integración de `nh3` para asegurar la neutralidad del contenido.
-- **Motor Híbrido**: Orquestación entre `Trafilatura` (excelencia semántica en blogs/noticias) y `MarkItDown` (fidelidad en documentos y tablas complejas).
-- **Normalización Post-Procesado**: Aplicación de `ftfy` para garantizar texto libre de mojibake y errores de codificación legacy.
-- **Contextualización**: Inyección de YAML Frontmatter para trazabilidad total del dato (URL, Sitename, Author, Date).
+- **Motor Híbrido**: Orquestación entre `Trafilatura` (excelencia semántica) y `MarkItDown` (fidelidad en documentos binarios).
+- **Normalización Post-Procesado**: Aplicación de `ftfy` para garantizar texto libre de mojibake.
 
 ### Fase 3: Navegación Inteligente y Asset Intelligence
 - **Control de Alcance (Scope)**: Estrategias de navegación granular (Smart, Strict, Broad) para evitar la explosión del crawling.

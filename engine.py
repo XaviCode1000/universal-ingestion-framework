@@ -37,7 +37,7 @@ import ftfy
 import trafilatura
 import yaml
 import nh3
-from selectolax.parser import HTMLParser
+from selectolax.parser import HTMLParser, Node
 
 
 # --- Configuración Estática ---
@@ -47,6 +47,50 @@ console = Console()
 
 
 # --- Utilidades de Limpieza y Procesamiento ---
+def get_text_density(node: Node) -> float:
+    """Calcula la relación entre texto dentro de enlaces y texto total."""
+    link_text_len = 0
+    total_text_content = node.text(deep=True, separator=" ", strip=True)
+    total_text_len = len(total_text_content)
+
+    if total_text_len == 0:
+        return 0.0
+
+    for a in node.css("a"):
+        link_text_len += len(a.text(deep=True, separator=" ", strip=True))
+
+    return link_text_len / total_text_len
+
+
+def prune_by_density(tree: HTMLParser) -> None:
+    """
+    Elimina bloques que parecen menús o basura basándose en la densidad de enlaces.
+    Estrategia Universal: Si un bloque tiene mucho enlace y poco texto narrativo, es ruido.
+    """
+    # Candidatos a ser ruido: div, ul, section, table, aside
+    # Iteramos por etiquetas comunes de contenedores
+    for tag in ["div", "section", "ul", "table", "aside"]:
+        for node in tree.css(tag):
+            # Ignoramos nodos muy pequeños (a veces son botones útiles)
+            text_content = node.text(deep=True, separator=" ", strip=True)
+            if len(text_content) < 10:
+                continue
+
+            density = get_text_density(node)
+
+            # REGLA DE ORO:
+            # Si más del 60% del texto es enlace Y el texto es relativamente corto,
+            # es casi seguro un menú o sidebar.
+            if density > 0.6 and len(text_content) < 300:
+                # Excepción: No borrar si parece una imagen principal o tiene una imagen importante
+                if not node.css("img"):
+                    node.decompose()
+
+            # REGLA PARA FOOTERS GIGANTES / SITEMAPS:
+            elif density > 0.9 and len(text_content) < 800:
+                node.decompose()
+
+
 def smart_url_normalize(url: str) -> str:
     """
     Normaliza una URL siguiendo estándares industriales (RFC 3986).
@@ -89,12 +133,12 @@ def smart_url_normalize(url: str) -> str:
 
 
 def pre_clean_html(raw_html: str) -> str:
-    """Elimina ruido que MarkItDown/Trafilatura no necesitan procesar."""
+    """Pipeline de limpieza quirúrgica v2.2"""
     if not raw_html:
         return ""
 
     tree = HTMLParser(raw_html)
-    # Eliminar elementos irrelevantes para el contenido principal
+    # 1. Poda Estática (Selectores conocidos)
     tags_to_remove = [
         "script",
         "style",
@@ -110,14 +154,19 @@ def pre_clean_html(raw_html: str) -> str:
         ".cookie-consent",
         ".ads",
         ".sidebar",
+        ".popup",
+        "#menu",
+        ".menu",
     ]
     for tag in tags_to_remove:
         for node in tree.css(tag):
             node.decompose()
 
-    # Sanitización con nh3 (librería Rust ultra-rápida)
-    # Solo permitimos un subconjunto seguro de etiquetas si quisiéramos visualizar,
-    # pero aquí lo usamos para asegurar que no hay inyecciones.
+    # 2. Poda Dinámica (Algoritmo de Densidad)
+    # Esto eliminará los menús hechos con <div> que no tienen clase "menu"
+    prune_by_density(tree)
+
+    # 3. Sanitización final con nh3
     return nh3.clean(tree.html or "")
 
 
@@ -517,7 +566,26 @@ class ArgeliaMigrationEngine:
             if not isinstance(raw_html, str):
                 raw_html = raw_html.decode("utf-8", errors="replace")
 
-            # 1. Extracción de Metadatos Semánticos
+            # 1. Extracción de Metadatos Semánticos (MEJORADA)
+            # Extraemos el título del HTML crudo ANTES de limpiarlo para no perder el head
+            raw_tree = HTMLParser(raw_html)
+            page_title = "Documento"
+
+            # Cascada de detección: OpenGraph -> Title Tag -> H1
+            og_title_node = raw_tree.css_first('meta[property="og:title"]')
+            title_tag_node = raw_tree.css_first("title")
+            h1_node = raw_tree.css_first("h1")
+
+            if og_title_node and og_title_node.attributes.get("content"):
+                page_title = og_title_node.attributes.get("content") or "Documento"
+            elif title_tag_node:
+                page_title = title_tag_node.text(strip=True)
+            elif h1_node:
+                page_title = h1_node.text(strip=True)
+
+            # Limpiar el título de sufijos comunes (sitename)
+            page_title = page_title.split("|")[0].split(" - ")[0].strip()
+
             try:
                 metadata = trafilatura.extract_metadata(raw_html)
             except Exception:
@@ -525,11 +593,11 @@ class ArgeliaMigrationEngine:
 
             metadata_dict = {
                 "url": url,
-                "title": getattr(metadata, "title", None) or "Documento",
+                "title": page_title,
                 "author": getattr(metadata, "author", "Desconocido"),
                 "date": getattr(metadata, "date", "N/A"),
                 "sitename": getattr(metadata, "sitename", self.domain),
-                "ingestion_engine": "UIF v2.0 (Elite Optimized)",
+                "ingestion_engine": "UIF v2.2 (Elite Optimized)",
             }
 
             # 2. Pre-Poda de Alta Velocidad (Selectolax + nh3)
@@ -593,21 +661,35 @@ class ArgeliaMigrationEngine:
                     continue
 
                 # --- 🛡️ CONTROL DE ALCANCE (SCOPE CONTROL) ---
+                # 1. Identificar si es un Asset (Imágenes, PDFs, etc.)
+                is_asset = any(
+                    full_url.lower().endswith(ext)
+                    for ext in [
+                        ".pdf",
+                        ".jpg",
+                        ".png",
+                        ".jpeg",
+                        ".gif",
+                        ".svg",
+                        ".webp",
+                    ]
+                )
+
+                # 2. Lógica de Seguimiento: Los assets SIEMPRE se siguen si son del dominio.
+                # Las páginas solo se siguen si cumplen la estrategia de alcance.
                 should_follow = False
 
-                if self.policy.scope == ScrapingScope.BROAD:
-                    # Modo "Todo el sitio": Si es el mismo dominio, entra.
+                if is_asset:
                     should_follow = True
-
+                elif self.policy.scope == ScrapingScope.BROAD:
+                    # Modo "Todo el sitio"
+                    should_follow = True
                 elif self.policy.scope == ScrapingScope.STRICT:
                     # Modo "Carpeta": Solo si empieza con la URL base.
                     if full_url.startswith(self.base_url):
                         should_follow = True
-
                 elif self.policy.scope == ScrapingScope.SMART:
-                    # Modo "Inteligente":
-                    # Si la URL base es profunda (ej: /en/latest/), actúa como STRICT.
-                    # Si la URL base es la raíz (ej: .com/), actúa como BROAD.
+                    # Modo "Inteligente"
                     path_parts = urlparse(self.base_url).path.strip("/").split("/")
                     path_depth = len([p for p in path_parts if p])
                     is_deep_start = path_depth >= 1
@@ -621,19 +703,6 @@ class ArgeliaMigrationEngine:
                 if not should_follow:
                     continue
                 # ---------------------------------------------
-
-                is_asset = any(
-                    full_url.lower().endswith(ext)
-                    for ext in [
-                        ".pdf",
-                        ".jpg",
-                        ".png",
-                        ".jpeg",
-                        ".gif",
-                        ".svg",
-                        ".webp",
-                    ]
-                )
 
                 if is_asset:
                     if full_url not in self.seen_assets:
