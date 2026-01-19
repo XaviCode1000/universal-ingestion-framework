@@ -1,0 +1,38 @@
+import pytest
+import aiosqlite
+from unittest.mock import MagicMock
+from argelia_scraper.engine import ArgeliaMigrationEngine
+from argelia_scraper.config import ScraperConfig
+from argelia_scraper.db_pool import SQLitePool
+from argelia_scraper.db_manager import StateManager
+
+
+@pytest.mark.asyncio
+async def test_engine_generate_summary(tmp_path):
+    config = ScraperConfig(data_dir=tmp_path)
+    db_path = tmp_path / "summary.db"
+
+    pool = SQLitePool(db_path)
+    state = StateManager(pool)
+    await state.initialize()
+
+    async with pool.acquire() as db:
+        await db.execute(
+            "INSERT INTO urls VALUES ('u1', 'completed', 'webpage', 0, NULL, CURRENT_TIMESTAMP)"
+        )
+        await db.execute(
+            "INSERT INTO urls VALUES ('u2', 'failed', 'webpage', 1, 'Network Error', CURRENT_TIMESTAMP)"
+        )
+        await db.commit()
+
+    engine = ArgeliaMigrationEngine(
+        config=config,
+        state=state,
+        text_extractor=MagicMock(),
+        metadata_extractor=MagicMock(),
+        asset_extractor=MagicMock(),
+        base_url="https://test.com",
+    )
+
+    await engine.generate_summary()
+    await pool.close_all()

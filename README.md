@@ -43,13 +43,13 @@ curl -LsSf https://astral.sh/uv/install.sh | sh
 ### Ejecución Interactiva (Recomendado)
 Simplemente ejecuta el motor y sigue al asistente visual:
 ```bash
-uv run engine.py
+uv run argelia-scraper --setup
 ```
 
 ### Ejecución Automática (CLI)
 Para flujos de trabajo automatizados o scripts de shell:
 ```bash
-uv run engine.py https://ejemplo.com --workers 10 --scope smart --only-text
+uv run argelia-scraper https://ejemplo.com --workers 10 --scope smart
 ```
 
 ---

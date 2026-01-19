@@ -10,6 +10,9 @@ console = Console()
 TARGETS: List[Path] = [
     Path("data"),
     Path(".pytest_cache"),
+    Path(".mypy_cache"),
+    Path(".ruff_cache"),
+    Path(".coverage"),
     Path("__pycache__"),
 ]
 
