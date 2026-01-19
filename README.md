@@ -4,80 +4,82 @@
 [![Architecture: Multi-Layer](https://img.shields.io/badge/architecture-multi--layer-orange.svg)]()
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)]()
 
-UIF es un motor de ingesta de conocimiento de alta fidelidad diseñado para transformar infraestructuras web legacy y activos documentales binarios en bases de datos Markdown optimizadas para LLMs y sistemas RAG (Retrieval-Augmented Generation).
+[🇪🇸 Leer en Español](README.es.md)
+
+UIF is a high-fidelity knowledge ingestion engine designed to transform legacy web infrastructures and binary document assets into Markdown databases optimized for LLMs and RAG (Retrieval-Augmented Generation) systems.
 
 ---
 
-## 🛑 CAPACIDADES DE ÉLITE
+## 🛑 ELITE CAPABILITIES
 
-- **Ingesta Multimodal Híbrida**: Conversión de alta fidelidad para `PDF`, `DOCX`, `XLSX` y `PPTX` vía **MarkItDown**, y extracción semántica superior para HTML vía **Trafilatura**.
-- **Limpieza de "Grado Industrial"**: Pipeline de pre-poda con **Selectolax**, sanitización con **nh3** y normalización Unicode con **ftfy** para eliminar el 100% del ruido y el *mojibake*.
-- **Navegación Inteligente (Scope Control)**: Estrategias `SMART`, `STRICT` y `BROAD` para controlar con precisión quirúrgica el alcance del rastreo (evitando salir de sub-sitios o documentación específica).
-- **Contexto RAG Enriquecido**: Inyección automática de **YAML Frontmatter** (URL, autor, fecha, título) en cada archivo para facilitar la indexación en bases de datos vectoriales.
-- **Resiliencia Industrial**: Gestión de estado mediante **SQLite en modo WAL**, permitiendo concurrencia real y recuperación automática tras fallos.
-- **UX Conversacional**: Asistente interactivo (Wizard) para configuración guiada de alcance, procesos y tipos de contenido.
-
----
-
-## 🏗️ ARQUITECTURA TÉCNICA (Pipeline v2.2 - The Signal Master)
-
-El motor opera en cuatro capas de refinamiento:
-
-1. **Capa de Navegación (Scrapling + Scope Logic)**: Orquestación asíncrona con evasión de bloqueos y filtrado de alcance inteligente basado en la profundidad de la URL semilla.
-2. **Capa de Purificación (Selectolax + Density Analysis)**: Eliminación masiva de ruido mediante selectores estáticos y un **Algoritmo de Densidad de Enlaces** que detecta y elimina menús/sidebars incluso en sitios no semánticos.
-3. **Capa de Conversión Híbrida**: Selección dinámica del mejor motor con **Estrategia de Título en Cascada** (Waterfall) para garantizar metadatos precisos, usando **Trafilatura** y **MarkItDown**.
-4. **Capa de Refinamiento (ftfy + YAML)**: Normalización final del texto (mojibake fix) y enriquecimiento con metadatos estructurados para máxima compatibilidad con sistemas RAG.
+- **Hybrid Multimodal Ingestion**: High-fidelity conversion for `PDF`, `DOCX`, `XLSX`, and `PPTX` via **MarkItDown**, and superior semantic extraction for HTML via **Trafilatura**.
+- **Industrial-Grade Cleaning**: Pre-pruning pipeline with **Selectolax**, sanitization with **nh3**, and Unicode normalization with **ftfy** to eliminate 100% of noise and *mojibake*.
+- **Intelligent Navigation (Scope Control)**: `SMART`, `STRICT`, and `BROAD` strategies to surgically control crawl scope (preventing leaks outside of sub-sites or specific documentation).
+- **Enriched RAG Context**: Automatic injection of **YAML Frontmatter** (URL, author, date, title) into every file for seamless indexing in vector databases.
+- **Industrial Resilience**: State management using **SQLite in WAL mode**, allowing real concurrency and automatic recovery from failures.
+- **Conversational UX**: Interactive Wizard for guided configuration of scope, processes, and content types.
 
 ---
 
-## 🚀 INSTALACIÓN Y USO
+## 🏗️ TECHNICAL ARCHITECTURE (v3.0.0 - Modular Enterprise)
 
-Este proyecto utiliza `uv` para una gestión de dependencias ultrarrápida y determinista.
+The engine operates across four layers of refinement:
 
-### Pre-requisitos
+1. **Navigation Layer (Scrapling + Scope Logic)**: Asynchronous orchestration with block evasion and intelligent scope filtering based on seed URL depth.
+2. **Purification Layer (Selectolax + Density Analysis)**: Massive noise elimination via static selectors and a **Link Density Algorithm** that detects and removes menus/sidebars even in non-semantic sites.
+3. **Hybrid Conversion Layer**: Dynamic selection of the best engine with a **Waterfall Title Strategy** to guarantee accurate metadata, using **Trafilatura** and **MarkItDown**.
+4. **Refinement Layer (ftfy + YAML)**: Final text normalization (mojibake fix) and structured metadata enrichment for maximum compatibility with RAG systems.
+
+---
+
+## 🚀 INSTALLATION AND USAGE
+
+This project uses `uv` for ultra-fast, deterministic dependency management.
+
+### Prerequisites
 ```bash
-# Instalar uv si no lo tienes
+# Install uv if you don't have it
 curl -LsSf https://astral.sh/uv/install.sh | sh
 ```
 
-### Ejecución Interactiva (Recomendado)
-Simplemente ejecuta el motor y sigue al asistente visual:
+### Interactive Execution (Recommended)
+Simply run the engine and follow the visual assistant:
 ```bash
 uv run argelia-scraper --setup
 ```
 
-### Ejecución Automática (CLI)
-Para flujos de trabajo automatizados o scripts de shell:
+### Automatic Execution (CLI)
+For automated workflows or shell scripts:
 ```bash
-uv run argelia-scraper https://ejemplo.com --workers 10 --scope smart
+uv run argelia-scraper https://example.com --workers 10 --scope smart
 ```
 
 ---
 
-## 📁 ESTRUCTURA DE SALIDA
+## 📁 OUTPUT STRUCTURE
 
-Cada proyecto genera una cápsula de datos independiente:
+Each project generates an independent data capsule:
 
 ```text
 data/
-└── dominio_com/
-    ├── content/              # Markdown puro de páginas web
+└── domain_com/
+    ├── content/              # Pure Markdown from web pages
     ├── media/
-    │   ├── images/           # Assets visuales descargados
-    │   └── docs/             # PDFs/Office + sus espejos .md
-    ├── state_dominio_com.db  # Base de datos de estado (WAL)
-    └── migration_audit.jsonl # Auditoría de bajo nivel
+    │   ├── images/           # Downloaded visual assets
+    │   └── docs/             # PDFs/Office + their .md mirrors
+    ├── state_domain_com.db  # State database (WAL)
+    └── migration_audit.jsonl # Low-level audit log
 ```
 
 ---
 
-## 🧪 MANTENIMIENTO
+## 🧪 MAINTENANCE
 
-Para realizar una purga controlada del entorno de datos y caches antes de una nueva migración:
+To perform a controlled purge of the data environment and caches before a new migration:
 ```bash
 uv run clean.py
 ```
 
 ---
 
-**Arquitecto:** "En UIF, no scrapeamos datos; curamos conocimiento. Cada archivo generado es una señal pura lista para ser comprendida por la próxima generación de IAs."
+**Architect:** "In UIF, we don't scrape data; we curate knowledge. Every generated file is a pure signal ready to be understood by the next generation of AIs."
