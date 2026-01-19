@@ -9,21 +9,21 @@ from rich.console import Console
 from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, TaskID
 from scrapling.fetchers import AsyncFetcher, AsyncStealthySession
 
-from argelia_scraper.config import ScraperConfig
-from argelia_scraper.db_manager import StateManager
-from argelia_scraper.models import MigrationStatus, ScrapingScope, WebPage
-from argelia_scraper.extractors.text_extractor import TextExtractor
-from argelia_scraper.extractors.metadata_extractor import MetadataExtractor
-from argelia_scraper.extractors.asset_extractor import AssetExtractor
-from argelia_scraper.utils.url_utils import smart_url_normalize, slugify
-from argelia_scraper.utils.html_cleaner import pre_clean_html
+from uif_scraper.config import ScraperConfig
+from uif_scraper.db_manager import StateManager
+from uif_scraper.models import MigrationStatus, ScrapingScope, WebPage
+from uif_scraper.extractors.text_extractor import TextExtractor
+from uif_scraper.extractors.metadata_extractor import MetadataExtractor
+from uif_scraper.extractors.asset_extractor import AssetExtractor
+from uif_scraper.utils.url_utils import smart_url_normalize, slugify
+from uif_scraper.utils.html_cleaner import pre_clean_html
 
-from argelia_scraper.utils.circuit_breaker import CircuitBreaker
+from uif_scraper.utils.circuit_breaker import CircuitBreaker
 
 console = Console()
 
 
-class ArgeliaMigrationEngine:
+class UIFMigrationEngine:
     def __init__(
         self,
         config: ScraperConfig,

@@ -1,4 +1,4 @@
-# PRD: Refactorización Arquitectónica - Argelia Scraper v3.0
+# PRD: Refactorización Arquitectónica - UIF Scraper v3.0
 
 **Documento de Requisitos de Producto - Nivel Production**  
 **Fecha:** 2026-01-19  
@@ -101,7 +101,7 @@ Refactorización completa hacia una **arquitectura modular** siguiendo principio
 - [ ] Validación con Pydantic
 - [ ] Paths expandibles (`~`, variables de entorno)
 
-**Archivo:** `argelia_scraper/config.py`
+**Archivo:** `uif_scraper/config.py`
 
 **Schema Config:**
 ```python
@@ -119,9 +119,9 @@ class ScraperConfig(BaseModel):
 
 **Ubicaciones de búsqueda (en orden):**
 1. `--config /ruta/personalizada/config.yaml` (CLI arg)
-2. `$XDG_CONFIG_HOME/argelia-scraper/config.yaml`
-3. `~/.config/argelia-scraper/config.yaml`
-4. `/etc/argelia-scraper/config.yaml`
+2. `$XDG_CONFIG_HOME/uif-scraper/config.yaml`
+3. `~/.config/uif-scraper/config.yaml`
+4. `/etc/uif-scraper/config.yaml`
 5. Valores por defecto (hardcoded)
 
 **Variable de entorno para override:**
@@ -141,7 +141,7 @@ export SCRAPER_MAX_WORKERS=20
 - [ ] Timeout configurable por conexión
 - [ ] Cleanup automático al finalizar
 
-**Archivo:** `argelia_scraper/db_pool.py`
+**Archivo:** `uif_scraper/db_pool.py`
 
 **API Propuesta:**
 ```python
@@ -174,7 +174,7 @@ PRAGMA busy_timeout=5000;         -- 5s antes de fallar
 
 **Estructura de Archivos:**
 ```
-argelia_scraper/
+uif_scraper/
 ├── __init__.py                 # Exports públicos
 ├── config.py                   # ScraperConfig
 ├── db_pool.py                  # SQLitePool
@@ -191,7 +191,7 @@ argelia_scraper/
 │   ├── text_extractor.py       # Trafilatura + MarkItDown
 │   ├── metadata_extractor.py   # Open Graph, Schema.org
 │   └── asset_extractor.py      # Descarga imágenes/PDFs
-├── engine.py                   # ArgeliaMigrationEngine (orquestador)
+├── engine.py                   # UIFMigrationEngine (orquestador)
 ├── cli.py                      # main() + argparse + wizard
 └── version.py                  # __version__ = "3.0.0"
 ```
@@ -705,7 +705,7 @@ Email:
                  ▼
 ┌─────────────────────────────────────────────────┐
 │               Orchestration Layer               │
-│  (engine.py - ArgeliaMigrationEngine)           │
+│  (engine.py - UIFMigrationEngine)           │
 │   - Gestión de colas                            │
 │   - Coordinación de workers                     │
 │   - Progress tracking                           │
@@ -801,7 +801,7 @@ class IStateManager(ABC):
 
 **Tareas:**
 1. [ ] **Crear estructura de directorios modular**
-   - Mover código a `argelia_scraper/` package
+   - Mover código a `uif_scraper/` package
    - Crear `__init__.py` con exports
    
 2. [ ] **Implementar ScraperConfig completo**
@@ -858,7 +858,7 @@ class IStateManager(ABC):
 **Objetivo:** Unir módulos y optimizar pipeline
 
 **Tareas:**
-1. [ ] **Refactorizar ArgeliaMigrationEngine**
+1. [ ] **Refactorizar UIFMigrationEngine**
    - Inyectar dependencias (config, state, extractors)
    - Delegar procesamiento a extractors
    - Simplificar lógica de workers
@@ -915,13 +915,13 @@ class IStateManager(ABC):
 cp -r scraper_v2 scraper_v2_backup
 
 # 2. Instalar nueva versión
-uv pip install argelia-scraper==3.0.0
+uv pip install uif-scraper==3.0.0
 
 # 3. Ejecutar wizard de config
-argelia-scraper --setup
+uif-scraper --setup
 
 # 4. Migrar datos antiguos (script provisto)
-python migrate_v2_to_v3.py --old-data ./data --new-config ~/.config/argelia-scraper/config.yaml
+python migrate_v2_to_v3.py --old-data ./data --new-config ~/.config/uif-scraper/config.yaml
 ```
 
 **Opción 2: Coexistencia (Transición Gradual)**
@@ -930,7 +930,7 @@ python migrate_v2_to_v3.py --old-data ./data --new-config ~/.config/argelia-scra
 python scraper_old.py --url https://sitio1.com
 
 # Usar v3.0 para nuevos proyectos
-argelia-scraper scrape --url https://sitio2.com
+uif-scraper scrape --url https://sitio2.com
 ```
 
 #### Breaking Changes
@@ -940,7 +940,7 @@ argelia-scraper scrape --url https://sitio2.com
 | Path de datos | `./data` hardcoded | Configurable | Ejecutar wizard o set `SCRAPER_DATA_DIR` |
 | CLI args | `--only-text` | `--extract text` | Actualizar scripts |
 | DB schema | Sin versión | Versionado | Auto-migración en primera ejecución |
-| Imports | `from scraper import Engine` | `from argelia_scraper import Engine` | Actualizar imports |
+| Imports | `from scraper import Engine` | `from uif_scraper import Engine` | Actualizar imports |
 
 ---
 
@@ -982,7 +982,7 @@ async def test_url_normalize_double_encoding():
 async def test_full_scrape_small_site(tmp_path):
     """Scraping completo de un sitio de 10 páginas"""
     config = ScraperConfig(data_dir=tmp_path, default_workers=2)
-    engine = ArgeliaMigrationEngine(config, url="http://example-test.com")
+    engine = UIFMigrationEngine(config, url="http://example-test.com")
     
     await engine.run()
     
@@ -999,7 +999,7 @@ async def test_retry_on_network_failure(mock_server):
     """Verifica que URLs fallidas se reintentan"""
     mock_server.add_failure("http://flaky.com/page1", times=2)
     
-    engine = ArgeliaMigrationEngine(...)
+    engine = UIFMigrationEngine(...)
     await engine.run()
     
     # Debe haber intentado 3 veces (1 inicial + 2 retries)
@@ -1012,7 +1012,7 @@ async def test_retry_on_network_failure(mock_server):
 async def test_high_concurrency_no_corruption():
     """20 workers procesando 100 URLs simultáneas"""
     config = ScraperConfig(default_workers=20)
-    engine = ArgeliaMigrationEngine(config, ...)
+    engine = UIFMigrationEngine(config, ...)
     
     await engine.run()
     
@@ -1177,7 +1177,7 @@ def monitor_scraper(pid):
 DÍA 1 (Lunes) - Setup Inicial
 ├─ 09:00-10:00 [BE] Kickoff + Revisión del PRD
 ├─ 10:00-12:00 [BE] 🔒 Crear estructura modular de directorios
-│                    Output: argelia_scraper/__init__.py con exports
+│                    Output: uif_scraper/__init__.py con exports
 ├─ 12:00-13:00      ALMUERZO
 ├─ 13:00-15:00 [BE] Mover modelos a models.py (sin cambiar lógica)
 ├─ 15:00-17:00 [BE] Setup de pytest + conftest.py base
@@ -1484,7 +1484,7 @@ DÍA 2 (Martes) - Pre-Release Validation
 
 DÍA 3 (Miércoles) - Release Day 🚀
 ├─ 09:00-10:00 [BE] Publicar en PyPI
-│                    uv pip install argelia-scraper==3.0.0
+│                    uv pip install uif-scraper==3.0.0
 ├─ 10:00-11:00 [BE] Actualizar Docker image
 ├─ 11:00-12:00      Anuncio interno (Slack, Email)
 ├─ 12:00-13:00      ALMUERZO (Celebración 🎉)

@@ -45,13 +45,13 @@ curl -LsSf https://astral.sh/uv/install.sh | sh
 ### Interactive Execution (Recommended)
 Simply run the engine and follow the visual assistant:
 ```bash
-uv run argelia-scraper --setup
+uv run uif-scraper --setup
 ```
 
 ### Automatic Execution (CLI)
 For automated workflows or shell scripts:
 ```bash
-uv run argelia-scraper https://example.com --workers 10 --scope smart
+uv run uif-scraper https://example.com --workers 10 --scope smart
 ```
 
 ---

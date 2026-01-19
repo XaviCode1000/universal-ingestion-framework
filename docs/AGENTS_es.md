@@ -36,7 +36,7 @@ Este documento define los estándares operativos, comandos de ejecución y filos
 Utilizar `BaseModel` de Pydantic con `frozen=True` cuando los datos no deban cambiar tras la validación inicial.
 
 ### 2. Convenciones de Nomenclatura
-- **Clases**: `PascalCase` (ej. `ArgeliaMigrationEngine`).
+- **Clases**: `PascalCase` (ej. `UIFMigrationEngine`).
 - **Funciones/Variables**: `snake_case`.
 - **Constantes**: `UPPER_SNAKE_CASE` (ej. `MAX_RETRIES`).
 - **Privados**: Prefijo `_` para métodos internos de clase.

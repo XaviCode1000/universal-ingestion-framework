@@ -1,5 +1,5 @@
 import pytest
-from argelia_scraper.utils.html_cleaner import pre_clean_html
+from uif_scraper.utils.html_cleaner import pre_clean_html
 
 
 def test_pre_clean_html_removes_all_static_tags():

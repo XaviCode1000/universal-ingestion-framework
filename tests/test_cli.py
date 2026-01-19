@@ -1,18 +1,18 @@
 import pytest
 import sys
 from unittest.mock import AsyncMock, patch, MagicMock
-from argelia_scraper.cli import main_async
+from uif_scraper.cli import main_async
 
 
 @pytest.mark.asyncio
 async def test_cli_setup_wizard():
-    with patch("argelia_scraper.cli.argparse.ArgumentParser.parse_args") as mock_args:
+    with patch("uif_scraper.cli.argparse.ArgumentParser.parse_args") as mock_args:
         mock_args.return_value = MagicMock(
             url=None, setup=True, config=None, scope="smart", workers=5
         )
 
         with patch(
-            "argelia_scraper.cli.run_wizard", new_callable=AsyncMock
+            "uif_scraper.cli.run_wizard", new_callable=AsyncMock
         ) as mock_wizard:
             mock_wizard.return_value = MagicMock(
                 data_dir="data", log_rotation_mb=50, log_level="INFO"
@@ -24,7 +24,7 @@ async def test_cli_setup_wizard():
 
 @pytest.mark.asyncio
 async def test_cli_run_direct(tmp_path):
-    with patch("argelia_scraper.cli.argparse.ArgumentParser.parse_args") as mock_args:
+    with patch("uif_scraper.cli.argparse.ArgumentParser.parse_args") as mock_args:
         mock_args.return_value = MagicMock(
             url="https://example.com",
             setup=False,
@@ -33,7 +33,7 @@ async def test_cli_run_direct(tmp_path):
             workers=5,
         )
 
-        with patch("argelia_scraper.cli.load_config_with_overrides") as mock_load:
+        with patch("uif_scraper.cli.load_config_with_overrides") as mock_load:
             mock_load.return_value = MagicMock(
                 data_dir=tmp_path,
                 log_rotation_mb=50,
@@ -46,7 +46,7 @@ async def test_cli_run_direct(tmp_path):
             )
 
             with patch(
-                "argelia_scraper.cli.ArgeliaMigrationEngine", return_value=AsyncMock()
+                "uif_scraper.cli.UIFMigrationEngine", return_value=AsyncMock()
             ) as mock_engine:
                 await main_async()
                 mock_engine.assert_called_once()

@@ -1,6 +1,6 @@
 import pytest
 import time
-from argelia_scraper.utils.circuit_breaker import CircuitBreaker
+from uif_scraper.utils.circuit_breaker import CircuitBreaker
 
 
 def test_circuit_breaker_threshold():

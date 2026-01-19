@@ -2,13 +2,13 @@ import pytest
 import asyncio
 from unittest.mock import AsyncMock, patch, MagicMock
 from pathlib import Path
-from argelia_scraper.engine import ArgeliaMigrationEngine, MigrationStatus
-from argelia_scraper.config import ScraperConfig
-from argelia_scraper.db_manager import StateManager
-from argelia_scraper.db_pool import SQLitePool
-from argelia_scraper.extractors.text_extractor import TextExtractor
-from argelia_scraper.extractors.metadata_extractor import MetadataExtractor
-from argelia_scraper.extractors.asset_extractor import AssetExtractor
+from uif_scraper.engine import UIFMigrationEngine, MigrationStatus
+from uif_scraper.config import ScraperConfig
+from uif_scraper.db_manager import StateManager
+from uif_scraper.db_pool import SQLitePool
+from uif_scraper.extractors.text_extractor import TextExtractor
+from uif_scraper.extractors.metadata_extractor import MetadataExtractor
+from uif_scraper.extractors.asset_extractor import AssetExtractor
 
 
 @pytest.mark.asyncio
@@ -23,7 +23,7 @@ async def test_engine_process_page_full(tmp_path):
     metadata_extractor = MetadataExtractor()
     asset_extractor = AssetExtractor(tmp_path)
 
-    engine = ArgeliaMigrationEngine(
+    engine = UIFMigrationEngine(
         config=config,
         state=state,
         text_extractor=text_extractor,

@@ -1,6 +1,6 @@
 import pytest
-from argelia_scraper.extractors.text_extractor import TextExtractor
-from argelia_scraper.extractors.metadata_extractor import MetadataExtractor
+from uif_scraper.extractors.text_extractor import TextExtractor
+from uif_scraper.extractors.metadata_extractor import MetadataExtractor
 
 
 @pytest.mark.asyncio

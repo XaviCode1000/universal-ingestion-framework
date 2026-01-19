@@ -1,13 +1,13 @@
-# Guía de Migración: Argelia Scraper v2.2 -> v3.0
+# Guía de Migración: UIF Scraper v2.2 -> v3.0
 
 Esta versión introduce cambios arquitectónicos significativos para mejorar la escalabilidad y mantenibilidad.
 
 ## Cambios Principales
 
-1. **Estructura Modular**: El código ya no es un solo archivo. Ahora es un paquete Python (`argelia_scraper`).
+1. **Estructura Modular**: El código ya no es un solo archivo. Ahora es un paquete Python (`uif_scraper`).
 2. **Sistema de Configuración**: Se usa `ScraperConfig` con soporte para archivos YAML y variables de entorno.
 3. **Persistencia**: SQLite ahora usa un pool de conexiones y modo WAL.
-4. **CLI**: Nuevo comando `argelia-scraper`.
+4. **CLI**: Nuevo comando `uif-scraper`.
 
 ## Pasos para Migrar
 
@@ -19,11 +19,11 @@ Esta versión introduce cambios arquitectónicos significativos para mejorar la 
 2. **Configuración Inicial**:
    Ejecuta el wizard para crear tu archivo de configuración:
    ```bash
-   argelia-scraper --setup
+   uif-scraper --setup
    ```
 
 3. **Actualizar Scripts**:
-   Si tenías scripts que llamaban a `engine.py`, ahora puedes usar `argelia-scraper` directamente.
+   Si tenías scripts que llamaban a `engine.py`, ahora puedes usar `uif-scraper` directamente.
 
    **Antes:**
    ```bash
@@ -32,7 +32,7 @@ Esta versión introduce cambios arquitectónicos significativos para mejorar la 
 
    **Después:**
    ```bash
-   argelia-scraper https://ejemplo.com --workers 10
+   uif-scraper https://ejemplo.com --workers 10
    ```
 
 4. **Variables de Entorno**:

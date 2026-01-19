@@ -1,7 +1,7 @@
 import pytest
 import os
 from pathlib import Path
-from argelia_scraper.extractors.asset_extractor import AssetExtractor
+from uif_scraper.extractors.asset_extractor import AssetExtractor
 
 
 @pytest.mark.asyncio

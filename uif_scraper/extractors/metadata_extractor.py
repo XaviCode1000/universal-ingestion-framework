@@ -1,7 +1,7 @@
 from typing import Any, Dict, Optional
 from selectolax.parser import HTMLParser
 import trafilatura
-from argelia_scraper.extractors.base import IExtractor
+from uif_scraper.extractors.base import IExtractor
 from urllib.parse import urlparse
 
 

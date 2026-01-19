@@ -1,6 +1,6 @@
 import pytest
 from pathlib import Path
-from argelia_scraper.logger import setup_logger
+from uif_scraper.logger import setup_logger
 
 
 def test_setup_logger(tmp_path):

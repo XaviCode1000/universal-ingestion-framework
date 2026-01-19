@@ -2,8 +2,8 @@ import io
 import trafilatura
 from markitdown import MarkItDown
 from typing import Any, Dict
-from argelia_scraper.extractors.base import IExtractor
-from argelia_scraper.utils.text_utils import clean_text
+from uif_scraper.extractors.base import IExtractor
+from uif_scraper.utils.text_utils import clean_text
 
 
 class TextExtractor(IExtractor):

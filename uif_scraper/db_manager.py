@@ -1,6 +1,6 @@
 from typing import List, Optional
-from argelia_scraper.db_pool import SQLitePool
-from argelia_scraper.models import MigrationStatus
+from uif_scraper.db_pool import SQLitePool
+from uif_scraper.models import MigrationStatus
 
 
 class StateManager:

@@ -1,10 +1,10 @@
 import pytest
 import asyncio
 from unittest.mock import AsyncMock, patch, MagicMock
-from argelia_scraper.engine import ArgeliaMigrationEngine
-from argelia_scraper.config import ScraperConfig
-from argelia_scraper.db_manager import StateManager, MigrationStatus
-from argelia_scraper.db_pool import SQLitePool
+from uif_scraper.engine import UIFMigrationEngine
+from uif_scraper.config import ScraperConfig
+from uif_scraper.db_manager import StateManager, MigrationStatus
+from uif_scraper.db_pool import SQLitePool
 
 
 @pytest.mark.asyncio
@@ -17,7 +17,7 @@ async def test_engine_setup_loads_state(tmp_path):
     await state.add_url("https://test.com/seen", MigrationStatus.COMPLETED)
     await state.add_url("https://test.com/pending", MigrationStatus.PENDING)
 
-    engine = ArgeliaMigrationEngine(
+    engine = UIFMigrationEngine(
         config=config,
         state=state,
         text_extractor=MagicMock(),
@@ -43,7 +43,7 @@ async def test_engine_download_asset(tmp_path):
     await state.initialize()
 
     asset_extractor = AsyncMock()
-    engine = ArgeliaMigrationEngine(
+    engine = UIFMigrationEngine(
         config=config,
         state=state,
         text_extractor=MagicMock(),

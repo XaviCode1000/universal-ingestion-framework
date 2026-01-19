@@ -25,7 +25,7 @@ dependencies = [
 ]
 
 [project.scripts]
-argelia-scraper = "argelia_scraper.cli:main"
+uif-scraper = "uif_scraper.cli:main"
 
 [dependency-groups]
 dev = [

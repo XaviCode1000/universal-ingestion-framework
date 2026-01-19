@@ -1,4 +1,4 @@
-# PRD: Architectural Refactoring - Argelia Scraper v3.0
+# PRD: Architectural Refactoring - UIF Scraper v3.0
 
 **Product Requirements Document - Production Level**  
 **Date:** 2026-01-19  
@@ -90,7 +90,7 @@ Complete refactoring towards a **modular architecture** following SOLID principl
 - [ ] Validation with Pydantic.
 - [ ] Expandable paths (`~`, env vars).
 
-**File:** `argelia_scraper/config.py`
+**File:** `uif_scraper/config.py`
 
 #### OBJ-2: Connection Pool for SQLite
 **Description:** Avoid race conditions and improve DB throughput.  
@@ -101,7 +101,7 @@ Complete refactoring towards a **modular architecture** following SOLID principl
 - [ ] Configurable timeout per connection.
 - [ ] Automatic cleanup on exit.
 
-**File:** `argelia_scraper/db_pool.py`
+**File:** `uif_scraper/db_pool.py`
 
 #### OBJ-3: Separation of Concerns (Modular Architecture)
 **Description:** Split the monolith into specialized modules.  
@@ -132,7 +132,7 @@ Complete refactoring towards a **modular architecture** following SOLID principl
                  ▼
 ┌─────────────────────────────────────────────────┐
 │               Orchestration Layer               │
-│  (engine.py - ArgeliaMigrationEngine)           │
+│  (engine.py - UIFMigrationEngine)           │
 │   - Queue management                            │
 │   - Worker coordination                         │
 │   - Progress tracking                           │

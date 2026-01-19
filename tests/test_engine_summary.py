@@ -1,10 +1,10 @@
 import pytest
 import aiosqlite
 from unittest.mock import MagicMock
-from argelia_scraper.engine import ArgeliaMigrationEngine
-from argelia_scraper.config import ScraperConfig
-from argelia_scraper.db_pool import SQLitePool
-from argelia_scraper.db_manager import StateManager
+from uif_scraper.engine import UIFMigrationEngine
+from uif_scraper.config import ScraperConfig
+from uif_scraper.db_pool import SQLitePool
+from uif_scraper.db_manager import StateManager
 
 
 @pytest.mark.asyncio
@@ -25,7 +25,7 @@ async def test_engine_generate_summary(tmp_path):
         )
         await db.commit()
 
-    engine = ArgeliaMigrationEngine(
+    engine = UIFMigrationEngine(
         config=config,
         state=state,
         text_extractor=MagicMock(),

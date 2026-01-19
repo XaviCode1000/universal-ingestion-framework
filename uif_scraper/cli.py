@@ -3,19 +3,19 @@ import asyncio
 import sys
 from pathlib import Path
 
-from argelia_scraper.config import load_config_with_overrides, run_wizard
-from argelia_scraper.db_manager import StateManager
-from argelia_scraper.db_pool import SQLitePool
-from argelia_scraper.engine import ArgeliaMigrationEngine
-from argelia_scraper.extractors.text_extractor import TextExtractor
-from argelia_scraper.extractors.metadata_extractor import MetadataExtractor
-from argelia_scraper.extractors.asset_extractor import AssetExtractor
-from argelia_scraper.logger import setup_logger
-from argelia_scraper.models import ScrapingScope
+from uif_scraper.config import load_config_with_overrides, run_wizard
+from uif_scraper.db_manager import StateManager
+from uif_scraper.db_pool import SQLitePool
+from uif_scraper.engine import UIFMigrationEngine
+from uif_scraper.extractors.text_extractor import TextExtractor
+from uif_scraper.extractors.metadata_extractor import MetadataExtractor
+from uif_scraper.extractors.asset_extractor import AssetExtractor
+from uif_scraper.logger import setup_logger
+from uif_scraper.models import ScrapingScope
 
 
 async def main_async() -> None:
-    parser = argparse.ArgumentParser(description="Argelia Scraper v3.0")
+    parser = argparse.ArgumentParser(description="UIF Scraper v3.0")
     parser.add_argument("url", nargs="?", help="URL base del sitio a procesar")
     parser.add_argument("--config", type=Path, help="Ruta al archivo de configuración")
     parser.add_argument(
@@ -55,7 +55,7 @@ async def main_async() -> None:
     metadata_extractor = MetadataExtractor()
     asset_extractor = AssetExtractor(config.data_dir)
 
-    engine = ArgeliaMigrationEngine(
+    engine = UIFMigrationEngine(
         config=config,
         state=state,
         text_extractor=text_extractor,

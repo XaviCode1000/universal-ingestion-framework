@@ -15,8 +15,8 @@ This document defines the operating standards, execution commands, and design ph
 ## 🚀 DEVELOPMENT COMMANDS
 
 ### Build and Execution
-- **Interactive Mode (Wizard)**: `uv run argelia-scraper --setup`
-- **CLI Execution**: `uv run argelia-scraper <URL> --workers 10`
+- **Interactive Mode (Wizard)**: `uv run uif-scraper --setup`
+- **CLI Execution**: `uv run uif-scraper <URL> --workers 10`
 - **Environment Cleanup**: `uv run clean.py`
 
 ### Quality and Style (Strict Mode)
@@ -26,7 +26,7 @@ This document defines the operating standards, execution commands, and design ph
 
 ### Testing (Pytest)
 - **Run all tests**: `uv run pytest`
-- **Coverage**: `uv run pytest --cov=argelia_scraper`
+- **Coverage**: `uv run pytest --cov=uif_scraper`
 
 ## 📐 STYLE AND ARCHITECTURE GUIDELINES
 
@@ -34,7 +34,7 @@ This document defines the operating standards, execution commands, and design ph
 Use Pydantic's `BaseModel` with `frozen=True` when data should not change after initial validation.
 
 ### 2. Naming Conventions
-- **Classes**: `PascalCase` (e.g., `ArgeliaMigrationEngine`).
+- **Classes**: `PascalCase` (e.g., `UIFMigrationEngine`).
 - **Functions/Variables**: `snake_case`.
 - **Constants**: `UPPER_SNAKE_CASE` (e.g., `MAX_RETRIES`).
 - **Privates**: `_` prefix for internal class methods.

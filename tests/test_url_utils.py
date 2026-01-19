@@ -1,5 +1,5 @@
 import pytest
-from argelia_scraper.utils.url_utils import smart_url_normalize, slugify
+from uif_scraper.utils.url_utils import smart_url_normalize, slugify
 
 
 def test_slugify():

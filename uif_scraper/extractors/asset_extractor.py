@@ -1,7 +1,7 @@
 from typing import Any, Dict
 from pathlib import Path
-from argelia_scraper.extractors.base import IExtractor
-from argelia_scraper.utils.url_utils import slugify
+from uif_scraper.extractors.base import IExtractor
+from uif_scraper.utils.url_utils import slugify
 from markitdown import MarkItDown
 import yaml
 import ftfy

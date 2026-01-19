@@ -54,9 +54,9 @@ def get_config_path(custom_path: Optional[Path] = None) -> Path:
         base_path = Path.home() / ".config"
 
     paths = [
-        base_path / "argelia-scraper" / "config.yaml",
-        Path.home() / ".config" / "argelia-scraper" / "config.yaml",
-        Path("/etc/argelia-scraper/config.yaml"),
+        base_path / "uif-scraper" / "config.yaml",
+        Path.home() / ".config" / "uif-scraper" / "config.yaml",
+        Path("/etc/uif-scraper/config.yaml"),
     ]
 
     for p in paths:

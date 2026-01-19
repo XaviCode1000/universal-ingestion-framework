@@ -14,11 +14,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Circuit Breaker pattern for domain-specific fault tolerance.
 - Type-safe implementation with `mypy --strict` compliance.
 - Automated test suite with 85% global coverage.
-- New CLI tool `argelia-scraper` with interactive setup wizard.
+- New CLI tool `uif-scraper` with interactive setup wizard.
 - Professional logging with rotation and compression using `loguru`.
 
 ### Changed
-- Refactored `ArgeliaMigrationEngine` to use Dependency Injection.
+- Refactored `UIFMigrationEngine` to use Dependency Injection.
 - Decoupled extraction logic into specialized modules (`TextExtractor`, `MetadataExtractor`, `AssetExtractor`).
 - Improved URL normalization to industry standards (RFC 3986).
 - Migrated dependency management to `uv`.

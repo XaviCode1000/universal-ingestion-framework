@@ -1,10 +1,10 @@
 import pytest
 import asyncio
 from unittest.mock import AsyncMock, patch, MagicMock
-from argelia_scraper.engine import ArgeliaMigrationEngine, MigrationStatus
-from argelia_scraper.config import ScraperConfig
-from argelia_scraper.db_pool import SQLitePool
-from argelia_scraper.db_manager import StateManager
+from uif_scraper.engine import UIFMigrationEngine, MigrationStatus
+from uif_scraper.config import ScraperConfig
+from uif_scraper.db_pool import SQLitePool
+from uif_scraper.db_manager import StateManager
 
 
 @pytest.mark.asyncio
@@ -14,7 +14,7 @@ async def test_engine_retry_logic(tmp_path):
     state.increment_retry = AsyncMock(side_effect=[1, 2])
     state.update_status = AsyncMock()
 
-    engine = ArgeliaMigrationEngine(
+    engine = UIFMigrationEngine(
         config=config,
         state=state,
         text_extractor=MagicMock(),
@@ -40,7 +40,7 @@ async def test_engine_run_orchestration(tmp_path):
     state = StateManager(pool)
     await state.initialize()
 
-    engine = ArgeliaMigrationEngine(
+    engine = UIFMigrationEngine(
         config=config,
         state=state,
         text_extractor=MagicMock(),
@@ -50,7 +50,7 @@ async def test_engine_run_orchestration(tmp_path):
     )
 
     engine.setup = AsyncMock()
-    with patch("argelia_scraper.engine.AsyncStealthySession") as mock_session:
+    with patch("uif_scraper.engine.AsyncStealthySession") as mock_session:
         session_instance = AsyncMock()
         mock_session.return_value.__aenter__.return_value = session_instance
 

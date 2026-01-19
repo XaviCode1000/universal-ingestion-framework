@@ -1,6 +1,6 @@
 import os
 from pathlib import Path
-from argelia_scraper.config import ScraperConfig
+from uif_scraper.config import ScraperConfig
 
 
 def test_config_default():
@@ -26,7 +26,7 @@ def test_config_expand_paths():
 def test_config_env_overrides():
     os.environ["SCRAPER_DATA_DIR"] = "/tmp/env_data"
     os.environ["SCRAPER_MAX_WORKERS"] = "99"
-    from argelia_scraper.config import load_config_with_overrides
+    from uif_scraper.config import load_config_with_overrides
 
     config = load_config_with_overrides()
     assert str(config.data_dir) == "/tmp/env_data"

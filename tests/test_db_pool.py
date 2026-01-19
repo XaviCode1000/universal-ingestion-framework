@@ -1,7 +1,7 @@
 import pytest
 import asyncio
 from pathlib import Path
-from argelia_scraper.db_pool import SQLitePool
+from uif_scraper.db_pool import SQLitePool
 
 
 @pytest.mark.asyncio

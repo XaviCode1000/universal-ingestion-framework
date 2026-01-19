@@ -1,7 +1,7 @@
 import pytest
 import os
-from argelia_scraper.db_pool import SQLitePool
-from argelia_scraper.db_manager import StateManager, MigrationStatus
+from uif_scraper.db_pool import SQLitePool
+from uif_scraper.db_manager import StateManager, MigrationStatus
 
 
 @pytest.mark.asyncio
