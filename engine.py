@@ -2,7 +2,16 @@ import asyncio
 from enum import Enum
 from pathlib import Path
 from typing import List, Optional, Set
-from urllib.parse import quote, urljoin, urlparse
+from urllib.parse import (
+    parse_qsl,
+    quote,
+    quote_plus,
+    unquote,
+    urlencode,
+    urljoin,
+    urlparse,
+    urlunparse,
+)
 
 import aiofiles
 import aiosqlite
@@ -38,6 +47,47 @@ console = Console()
 
 
 # --- Utilidades de Limpieza y Procesamiento ---
+def smart_url_normalize(url: str) -> str:
+    """
+    Normaliza una URL siguiendo estándares industriales (RFC 3986).
+    Maneja automáticamente caracteres especiales, espacios y queries complejas.
+    Evita el doble encoding y repara URLs mal formadas.
+    Compatible con servidores Legacy (PHP/ASP) convirtiendo espacios a '+' en la query.
+    """
+    if not url:
+        return ""
+
+    # 1. Parsear la URL en sus componentes
+    parsed = urlparse(url)
+
+    # 2. Limpiar la RUTA (Path)
+    # Primero decodificamos (unquote) para evitar "doble encoding"
+    # Luego codificamos (quote) permitiendo solo las barras '/'
+    clean_path = quote(unquote(parsed.path), safe="/")
+
+    # 3. Limpiar la QUERY (Parámetros)
+    # parse_qsl convierte "?a=1&b=café" en [('a', '1'), ('b', 'café')]
+    query_params = parse_qsl(parsed.query, keep_blank_values=True)
+
+    # urlencode reconstruye la string codificando SOLO los valores y claves
+    # Usamos quote_plus para compatibilidad con PHP Legacy (Espacio -> +)
+    clean_query = urlencode(query_params, quote_via=quote_plus)
+
+    # 4. Reconstruir la URL final
+    clean_url = urlunparse(
+        (
+            parsed.scheme,
+            parsed.netloc,
+            clean_path,
+            parsed.params,
+            clean_query,
+            parsed.fragment,
+        )
+    )
+
+    return clean_url
+
+
 def pre_clean_html(raw_html: str) -> str:
     """Elimina ruido que MarkItDown/Trafilatura no necesitan procesar."""
     if not raw_html:
@@ -417,18 +467,36 @@ class ArgeliaMigrationEngine:
 
     async def process_page(self, session: AsyncStealthySession, url: str) -> None:
         try:
-            p = urlparse(url)
-            encoded_url = urljoin(
-                self.base_url, quote(p.path) + ("?" + quote(p.query) if p.query else "")
-            )
+            # --- CONSTRUCCIÓN DE URL ROBUSTA (INDUSTRIAL STANDARD) ---
+            # 1. Unir la URL relativa con la base (resuelve ../ etc.)
+            full_absolute_url = urljoin(self.base_url, url)
+
+            # 2. Normalizar y Sanitizar la URL resultante
+            # Esto arregla espacios, tildes, símbolos raros y el famoso %3D
+            encoded_url = smart_url_normalize(full_absolute_url)
+            # ---------------------------------------------------------
 
             page = None
             if self.use_browser_mode:
                 page = await session.fetch(encoded_url, timeout=45000)
             else:
                 resp = await AsyncFetcher.get(
-                    encoded_url, impersonate="chrome", timeout=20
+                    encoded_url,
+                    impersonate="chrome",
+                    timeout=20,
+                    headers={"Referer": self.base_url, "Origin": self.base_url},
                 )
+
+                # --- MANEJO INTELIGENTE DE ERRORES DE SERVIDOR ---
+                if resp.status == 500:
+                    console.print(
+                        f"[dim red]      Server Error (500) en {url}. Saltando...[/]"
+                    )
+                    await self.state.update_status(
+                        url, MigrationStatus.FAILED, "Server Side Error (500)"
+                    )
+                    return
+
                 if resp.status in [403, 401, 429]:
                     console.print(
                         "[yellow][SWITCH][/] Activando modo navegador global..."
