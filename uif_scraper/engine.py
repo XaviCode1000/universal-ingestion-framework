@@ -1,6 +1,6 @@
 import asyncio
 import json
-from typing import Optional, Set
+from typing import Optional, Set, List
 from urllib.parse import urljoin, urlparse
 
 import aiofiles
@@ -17,7 +17,6 @@ from uif_scraper.extractors.metadata_extractor import MetadataExtractor
 from uif_scraper.extractors.asset_extractor import AssetExtractor
 from uif_scraper.utils.url_utils import smart_url_normalize, slugify
 from uif_scraper.utils.html_cleaner import pre_clean_html
-
 from uif_scraper.utils.circuit_breaker import CircuitBreaker
 
 console = Console()
@@ -58,7 +57,6 @@ class UIFMigrationEngine:
         self.report_lock = asyncio.Lock()
 
         self.progress: Optional[Progress] = None
-
         self.page_task: Optional[TaskID] = None
         self.asset_task: Optional[TaskID] = None
         self.use_browser_mode = False
@@ -71,7 +69,6 @@ class UIFMigrationEngine:
 
     async def setup(self) -> None:
         await self.state.initialize()
-
         async with self.state.pool.acquire() as db:
             async with db.execute("SELECT url, type, status FROM urls") as cursor:
                 async for row in cursor:
@@ -135,7 +132,6 @@ class UIFMigrationEngine:
 
         try:
             encoded_url = smart_url_normalize(url)
-
             page = None
             if self.use_browser_mode:
                 page = await session.fetch(encoded_url, timeout=45000)
@@ -146,13 +142,11 @@ class UIFMigrationEngine:
                     timeout=self.config.timeout_seconds,
                     headers={"Referer": self.base_url, "Origin": self.base_url},
                 )
-
                 if resp.status == 500:
                     await self.state.update_status(
                         url, MigrationStatus.FAILED, "Server Side Error (500)"
                     )
                     return
-
                 if resp.status in [403, 401, 429]:
                     self.use_browser_mode = True
                     page = await session.fetch(encoded_url, timeout=45000)
@@ -165,21 +159,17 @@ class UIFMigrationEngine:
                 raise Exception("Empty content")
 
             self.circuit_breaker.record_success(self.domain)
-
             raw_html = getattr(page, "raw_content", "") or getattr(page, "body", "")
-
             if not isinstance(raw_html, str):
                 raw_html = raw_html.decode("utf-8", errors="replace")
 
             clean_html = pre_clean_html(raw_html)
-
             metadata_task = asyncio.create_task(
                 self.metadata_extractor.extract(raw_html, url)
             )
             text_task = asyncio.create_task(
                 self.text_extractor.extract(clean_html, url)
             )
-
             metadata = await metadata_task
             text_data = await text_task
 
@@ -197,7 +187,6 @@ class UIFMigrationEngine:
 
             new_assets = []
             new_pages = []
-
             links = [str(node) for node in page.css("a::attr(href)")]
             images = [str(node) for node in page.css("img::attr(src)")]
 
@@ -206,7 +195,6 @@ class UIFMigrationEngine:
                     continue
                 full_url = urljoin(url, str(link)).split("#")[0]
                 parsed_link = urlparse(full_url)
-
                 if parsed_link.netloc != self.domain:
                     continue
 
@@ -222,7 +210,6 @@ class UIFMigrationEngine:
                         ".webp",
                     ]
                 )
-
                 should_follow = False
                 if is_asset:
                     should_follow = True
@@ -242,7 +229,6 @@ class UIFMigrationEngine:
 
                 if not should_follow:
                     continue
-
                 if is_asset:
                     if full_url not in self.seen_assets:
                         self.seen_assets.add(full_url)
@@ -262,12 +248,10 @@ class UIFMigrationEngine:
             pages_to_add = [
                 (p_url, MigrationStatus.PENDING, "webpage") for p_url in new_pages
             ]
-
             await self.state.add_urls_batch(assets_to_add + pages_to_add)
 
             for asset in new_assets:
                 await self.asset_queue.put(asset)
-
             for p_url in new_pages:
                 await self.url_queue.put(p_url)
 
@@ -324,9 +308,13 @@ class UIFMigrationEngine:
                 self.asset_queue.task_done()
 
     async def generate_summary(self) -> None:
-        import polars as pl
+        from rich.table import Table
+        from rich.panel import Panel
+        from rich.rule import Rule
 
-        console.print("\n[bold cyan]📊 Reporte Final de Migración[/]")
+        console.print("\n")
+        console.print(Rule(title="[bold blue]🚀 INGESTIÓN FINALIZADA[/]", style="blue"))
+        console.print("\n")
 
         async with self.state.pool.acquire() as db:
             cursor = await db.execute(
@@ -335,27 +323,70 @@ class UIFMigrationEngine:
             rows = await cursor.fetchall()
 
             if rows:
-                schema_gen = {"status": pl.String, "count": pl.Int64}
-                df = pl.DataFrame(rows, schema=schema_gen, orient="row")
-                console.print(df.sort("count", descending=True))
-            else:
-                console.print("[dim]No hay datos.[/dim]")
+                status_table = Table(
+                    title="[bold cyan]📊 Resumen de Ejecución[/]",
+                    box=None,
+                    header_style="bold magenta",
+                    expand=False,
+                )
+                status_table.add_column("Estado", justify="left")
+                status_table.add_column("Cantidad", justify="right", style="bold")
 
-            console.print("\n[bold red]⚠️ Fallos Críticos (Top 5):[/]")
+                total = 0
+                for status_val, count in rows:
+                    total += count
+                    color = "green" if status_val == "completed" else "yellow"
+                    if status_val == "failed":
+                        color = "red"
+                    icon = "✅" if status_val == "completed" else "⏳"
+                    if status_val == "failed":
+                        icon = "❌"
+                    status_table.add_row(
+                        f"{icon} {status_val.capitalize()}", str(count), style=color
+                    )
+
+                status_table.add_section()
+                status_table.add_row("Total Procesado", str(total), style="bold blue")
+                console.print(status_table)
+
+            console.print("\n")
             cursor_fail = await db.execute(
                 "SELECT COALESCE(last_error, 'Unknown') as error, COUNT(*) as count FROM urls WHERE status='failed' GROUP BY last_error ORDER BY count DESC LIMIT 5"
             )
             rows_fail = await cursor_fail.fetchall()
 
             if rows_fail:
-                schema_fail = {"error": pl.String, "count": pl.Int64}
-                console.print(pl.DataFrame(rows_fail, schema=schema_fail, orient="row"))
+                fail_table = Table(
+                    title="[bold red]⚠️ Diagnóstico de Errores (Top 5)[/]",
+                    box=None,
+                    header_style="bold red",
+                    expand=True,
+                    border_style="red",
+                )
+                fail_table.add_column("Mensaje de Error", ratio=3)
+                fail_table.add_column("Ocurrencias", justify="right", ratio=1)
+                for err, count in rows_fail:
+                    fail_table.add_row(f"[dim]{err}[/]", f"[bold]{count}[/]")
+                console.print(
+                    Panel(
+                        fail_table,
+                        border_style="red",
+                        title="[bold white]ALERTA DE SISTEMA[/]",
+                    )
+                )
             else:
-                console.print("[green]¡Cero fallos![/green]")
+                console.print(
+                    Panel(
+                        "[bold green]✨ ¡Felicidades! Ingesta completada con 0 errores críticos.[/]",
+                        border_style="green",
+                        padding=(1, 2),
+                    )
+                )
+
+        console.print("\n" + Rule(style="blue") + "\n")
 
     async def run(self) -> None:
         await self.setup()
-
         dns_args = []
         if self.config.dns_overrides:
             rules = ", ".join(
@@ -402,10 +433,8 @@ class UIFMigrationEngine:
                     asyncio.create_task(self.asset_worker())
                     for _ in range(self.config.asset_workers)
                 ]
-
                 await self.url_queue.join()
                 await self.asset_queue.join()
-
                 for w in page_workers + asset_workers:
                     w.cancel()
 
