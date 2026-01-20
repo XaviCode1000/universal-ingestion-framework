@@ -30,6 +30,7 @@ async def test_engine_process_page_full(tmp_path):
         metadata_extractor=metadata_extractor,
         asset_extractor=asset_extractor,
         base_url="https://test.com",
+        project_dir=tmp_path,
     )
 
     await state.add_url("https://test.com", MigrationStatus.PENDING)

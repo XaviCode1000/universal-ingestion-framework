@@ -21,6 +21,7 @@ async def test_engine_retry_logic(tmp_path):
         metadata_extractor=MagicMock(),
         asset_extractor=MagicMock(),
         base_url="https://test.com",
+        project_dir=tmp_path,
     )
 
     with patch(
@@ -47,6 +48,7 @@ async def test_engine_run_orchestration(tmp_path):
         metadata_extractor=MagicMock(),
         asset_extractor=MagicMock(),
         base_url="https://test.com",
+        project_dir=tmp_path,
     )
 
     engine.setup = AsyncMock()

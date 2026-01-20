@@ -2,6 +2,7 @@ import argparse
 import asyncio
 import sys
 from pathlib import Path
+from urllib.parse import urlparse
 
 from uif_scraper.config import load_config_with_overrides, run_wizard
 from uif_scraper.db_manager import StateManager
@@ -12,6 +13,7 @@ from uif_scraper.extractors.metadata_extractor import MetadataExtractor
 from uif_scraper.extractors.asset_extractor import AssetExtractor
 from uif_scraper.logger import setup_logger
 from uif_scraper.models import ScrapingScope
+from uif_scraper.utils.url_utils import slugify
 
 
 async def main_async() -> None:
@@ -44,16 +46,17 @@ async def main_async() -> None:
 
     setup_logger(config.data_dir, config.log_rotation_mb, config.log_level)
 
-    db_path = (
-        config.data_dir
-        / f"state_{args.url.replace('://', '_').replace('.', '_').replace('/', '_')}.db"
-    )
+    domain_slug = slugify(urlparse(args.url).netloc)
+    project_data_dir = config.data_dir / domain_slug
+    project_data_dir.mkdir(parents=True, exist_ok=True)
+
+    db_path = project_data_dir / "state.db"
     pool = SQLitePool(db_path, max_size=5)
     state = StateManager(pool)
 
     text_extractor = TextExtractor()
     metadata_extractor = MetadataExtractor()
-    asset_extractor = AssetExtractor(config.data_dir)
+    asset_extractor = AssetExtractor(project_data_dir)
 
     engine = UIFMigrationEngine(
         config=config,
@@ -63,6 +66,7 @@ async def main_async() -> None:
         asset_extractor=asset_extractor,
         base_url=args.url,
         scope=ScrapingScope(args.scope),
+        project_dir=project_data_dir,
     )
 
     try:

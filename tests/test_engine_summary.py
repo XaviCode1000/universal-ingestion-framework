@@ -32,6 +32,7 @@ async def test_engine_generate_summary(tmp_path):
         metadata_extractor=MagicMock(),
         asset_extractor=MagicMock(),
         base_url="https://test.com",
+        project_dir=tmp_path,
     )
 
     await engine.generate_summary()

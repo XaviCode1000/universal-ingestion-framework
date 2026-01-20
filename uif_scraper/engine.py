@@ -1,5 +1,6 @@
 import asyncio
 import json
+from pathlib import Path
 from typing import Optional, Set, List
 from urllib.parse import urljoin, urlparse
 
@@ -33,6 +34,7 @@ class UIFMigrationEngine:
         base_url: str,
         scope: ScrapingScope = ScrapingScope.SMART,
         circuit_breaker: Optional[CircuitBreaker] = None,
+        project_dir: Optional[Path] = None,
     ):
         self.config = config
         self.state = state
@@ -43,6 +45,8 @@ class UIFMigrationEngine:
         self.domain = urlparse(base_url).netloc
         self.scope = scope
         self.circuit_breaker = circuit_breaker or CircuitBreaker()
+        self.project_dir = project_dir or config.data_dir / slugify(self.domain)
+        self.project_dir.mkdir(parents=True, exist_ok=True)
 
         self.url_queue: asyncio.Queue[str] = asyncio.Queue()
         self.asset_queue: asyncio.Queue[str] = asyncio.Queue()
@@ -62,7 +66,7 @@ class UIFMigrationEngine:
         self.use_browser_mode = False
 
     async def log_event(self, data: WebPage) -> None:
-        report_path = self.config.data_dir / "migration_audit.jsonl"
+        report_path = self.project_dir / "migration_audit.jsonl"
         async with self.report_lock:
             async with aiofiles.open(report_path, "a", encoding="utf-8") as f:
                 await f.write(json.dumps(data.model_dump(mode="json")) + "\n")
@@ -176,7 +180,7 @@ class UIFMigrationEngine:
             path_slug = slugify(
                 url.replace(self.base_url, "").replace(".php", "") or "index"
             )
-            md_path = self.config.data_dir / "content" / f"{path_slug}.md"
+            md_path = self.project_dir / "content" / f"{path_slug}.md"
             md_path.parent.mkdir(parents=True, exist_ok=True)
 
             import yaml
@@ -383,7 +387,9 @@ class UIFMigrationEngine:
                     )
                 )
 
-        console.print("\n" + Rule(style="blue") + "\n")
+        console.print("\n")
+        console.print(Rule(style="blue"))
+        console.print("\n")
 
     async def run(self) -> None:
         await self.setup()

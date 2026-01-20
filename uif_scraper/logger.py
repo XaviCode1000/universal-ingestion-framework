@@ -1,10 +1,34 @@
 import sys
+import logging
 from pathlib import Path
 from loguru import logger
 from rich.logging import RichHandler
 
 
+class InterceptHandler(logging.Handler):
+    def emit(self, record: logging.LogRecord) -> None:
+        try:
+            level = logger.level(record.levelname).name
+        except ValueError:
+            level = record.levelno
+
+        frame, depth = logging.currentframe(), 2
+        while frame.f_code.co_filename == logging.__file__:
+            if frame.f_back:
+                frame = frame.f_back
+                depth += 1
+
+        logger.opt(depth=depth, exception=record.exc_info).log(
+            level, record.getMessage()
+        )
+
+
 def setup_logger(data_dir: Path, rotation: int = 50, level: str = "INFO") -> None:
+    logging.basicConfig(handlers=[InterceptHandler()], level=0, force=True)
+
+    for noisy_logger in ["scrapling", "patchright", "httpx", "httpcore"]:
+        logging.getLogger(noisy_logger).setLevel(logging.WARNING)
+
     logger.remove()
 
     logger.add(

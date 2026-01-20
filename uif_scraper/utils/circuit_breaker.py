@@ -3,7 +3,7 @@ from typing import Dict
 
 
 class CircuitBreaker:
-    def __init__(self, threshold: int = 5, timeout: int = 300):
+    def __init__(self, threshold: int = 5, timeout: float = 300.0):
         self.threshold = threshold
         self.timeout = timeout
         self.failures: Dict[str, int] = {}
