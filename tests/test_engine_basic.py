@@ -9,6 +9,8 @@ from uif_scraper.db_pool import SQLitePool
 from uif_scraper.extractors.text_extractor import TextExtractor
 from uif_scraper.extractors.metadata_extractor import MetadataExtractor
 from uif_scraper.extractors.asset_extractor import AssetExtractor
+from uif_scraper.navigation import NavigationService
+from uif_scraper.reporter import ReporterService
 
 
 @pytest.mark.asyncio
@@ -22,13 +24,17 @@ async def test_engine_simple_run(tmp_path):
     metadata_extractor = MetadataExtractor()
     asset_extractor = AssetExtractor(tmp_path)
 
+    nav = NavigationService("https://test.com")
+    rep = ReporterService(MagicMock(), state)
+
     engine = UIFMigrationEngine(
         config=config,
         state=state,
         text_extractor=text_extractor,
         metadata_extractor=metadata_extractor,
         asset_extractor=asset_extractor,
-        base_url="https://test.com",
+        navigation_service=nav,
+        reporter_service=rep,
     )
 
     engine.setup = AsyncMock()
@@ -36,7 +42,6 @@ async def test_engine_simple_run(tmp_path):
     engine.process_page = AsyncMock()
 
     session = AsyncMock()
-
     task = asyncio.create_task(engine.page_worker(session))
 
     await engine.url_queue.join()

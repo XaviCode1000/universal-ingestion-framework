@@ -1,11 +1,11 @@
 import argparse
 import asyncio
-import sys
 from pathlib import Path
 from typing import Optional
 from urllib.parse import urlparse
 
 import questionary
+from questionary import Choice
 from rich.console import Console
 
 from uif_scraper.config import load_config_with_overrides, run_wizard
@@ -18,6 +18,8 @@ from uif_scraper.extractors.asset_extractor import AssetExtractor
 from uif_scraper.logger import setup_logger
 from uif_scraper.models import ScrapingScope
 from uif_scraper.utils.url_utils import slugify
+from uif_scraper.navigation import NavigationService
+from uif_scraper.reporter import ReporterService
 
 console = Console()
 
@@ -32,9 +34,9 @@ async def run_mission_wizard() -> Optional[dict]:
     scope = await questionary.select(
         "Alcance del rastreo (Scope):",
         choices=[
-            {"name": "Smart (Subdirectorio o Dominio)", "value": "smart"},
-            {"name": "Strict (Solo ruta exacta)", "value": "strict"},
-            {"name": "Broad (Todo el dominio)", "value": "broad"},
+            Choice(title="Smart (Subdirectorio o Dominio)", value="smart"),
+            Choice(title="Strict (Solo ruta exacta)", value="strict"),
+            Choice(title="Broad (Todo el dominio)", value="broad"),
         ],
         default="smart",
     ).ask_async()
@@ -42,8 +44,8 @@ async def run_mission_wizard() -> Optional[dict]:
     mode = await questionary.select(
         "Modo de extracción:",
         choices=[
-            {"name": "Solo Texto (Markdown optimizado)", "value": "text"},
-            {"name": "Texto + Assets (Imágenes, PDFs)", "value": "full"},
+            Choice(title="Solo Texto (Markdown optimizado)", value="text"),
+            Choice(title="Texto + Assets (Imágenes, PDFs)", value="full"),
         ],
         default="full",
     ).ask_async()
@@ -87,9 +89,15 @@ async def main_async() -> None:
     if args.workers:
         config.default_workers = args.workers
 
+    # Resolver data_dir relativo al directorio actual de ejecución si no es absoluto
+    # Esto evita el anidamiento si se ejecuta desde carpetas inesperadas
+    if not config.data_dir.is_absolute():
+        config.data_dir = Path.cwd() / "data"
+
     setup_logger(config.data_dir, config.log_rotation_mb, config.log_level)
 
     domain_slug = slugify(urlparse(mission_url).netloc)
+    # Estructura: data/<domain_slug>/
     project_data_dir = config.data_dir / domain_slug
     project_data_dir.mkdir(parents=True, exist_ok=True)
 
@@ -101,15 +109,17 @@ async def main_async() -> None:
     metadata_extractor = MetadataExtractor()
     asset_extractor = AssetExtractor(project_data_dir)
 
+    navigation_service = NavigationService(mission_url, ScrapingScope(mission_scope))
+    reporter_service = ReporterService(console, state)
+
     engine = UIFMigrationEngine(
         config=config,
         state=state,
         text_extractor=text_extractor,
         metadata_extractor=metadata_extractor,
         asset_extractor=asset_extractor,
-        base_url=mission_url,
-        scope=ScrapingScope(mission_scope),
-        project_dir=project_data_dir,
+        navigation_service=navigation_service,
+        reporter_service=reporter_service,
         extract_assets=mission_extract_assets,
     )
 

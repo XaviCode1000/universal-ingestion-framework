@@ -1,26 +1,35 @@
 import asyncio
 import json
-from pathlib import Path
 from typing import Optional, Set, List
-from urllib.parse import urljoin, urlparse
 
 import aiofiles
+import yaml
 from loguru import logger
-from rich.console import Console
-from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, TaskID
+from rich.layout import Layout
+from rich.live import Live
+from rich.panel import Panel
+from rich.table import Table
+from rich.progress import (
+    Progress,
+    SpinnerColumn,
+    TextColumn,
+    BarColumn,
+    TaskID,
+    TimeElapsedColumn,
+)
 from scrapling.fetchers import AsyncFetcher, AsyncStealthySession
 
 from uif_scraper.config import ScraperConfig
 from uif_scraper.db_manager import StateManager
-from uif_scraper.models import MigrationStatus, ScrapingScope, WebPage
+from uif_scraper.models import MigrationStatus, WebPage
 from uif_scraper.extractors.text_extractor import TextExtractor
 from uif_scraper.extractors.metadata_extractor import MetadataExtractor
 from uif_scraper.extractors.asset_extractor import AssetExtractor
 from uif_scraper.utils.url_utils import smart_url_normalize, slugify
 from uif_scraper.utils.html_cleaner import pre_clean_html
 from uif_scraper.utils.circuit_breaker import CircuitBreaker
-
-console = Console()
+from uif_scraper.navigation import NavigationService
+from uif_scraper.reporter import ReporterService
 
 
 class UIFMigrationEngine:
@@ -31,10 +40,8 @@ class UIFMigrationEngine:
         text_extractor: TextExtractor,
         metadata_extractor: MetadataExtractor,
         asset_extractor: AssetExtractor,
-        base_url: str,
-        scope: ScrapingScope = ScrapingScope.SMART,
-        circuit_breaker: Optional[CircuitBreaker] = None,
-        project_dir: Optional[Path] = None,
+        navigation_service: NavigationService,
+        reporter_service: ReporterService,
         extract_assets: bool = True,
     ):
         self.config = config
@@ -42,13 +49,11 @@ class UIFMigrationEngine:
         self.text_extractor = text_extractor
         self.metadata_extractor = metadata_extractor
         self.asset_extractor = asset_extractor
-        self.base_url = base_url
-        self.domain = urlparse(base_url).netloc
-        self.scope = scope
-        self.circuit_breaker = circuit_breaker or CircuitBreaker()
-        self.project_dir = project_dir or config.data_dir / slugify(self.domain)
-        self.project_dir.mkdir(parents=True, exist_ok=True)
+        self.navigation = navigation_service
+        self.reporter = reporter_service
+
         self.extract_assets = extract_assets
+        self.circuit_breaker = CircuitBreaker()
 
         self.url_queue: asyncio.Queue[str] = asyncio.Queue()
         self.asset_queue: asyncio.Queue[str] = asyncio.Queue()
@@ -66,9 +71,87 @@ class UIFMigrationEngine:
         self.page_task: Optional[TaskID] = None
         self.asset_task: Optional[TaskID] = None
         self.use_browser_mode = False
+        self.activity_log: List[dict] = []
+        self.start_time = asyncio.get_event_loop().time()
 
-    async def log_event(self, data: WebPage) -> None:
-        report_path = self.project_dir / "migration_audit.jsonl"
+    def create_layout(self) -> Layout:
+        layout = Layout()
+        layout.split_column(
+            Layout(name="header", size=3),
+            Layout(name="body"),
+        )
+        layout["body"].split_row(
+            Layout(name="stats", ratio=1),
+            Layout(name="activity", ratio=2),
+        )
+        return layout
+
+    def update_layout(self, layout: Layout) -> None:
+        # Header
+        layout["header"].update(
+            Panel(
+                f"🛸 [bold blue]MISIÓN:[/][white] {self.navigation.base_url} [/] | "
+                f"[bold yellow]SCOPE:[/][white] {self.navigation.scope.value.upper()} [/] | "
+                f"[bold cyan]WORKERS:[/][white] {self.config.default_workers} [/] | "
+                f"[bold green]MODE:[/][white] {'BROWSER' if self.use_browser_mode else 'STEALTH'}",
+                border_style="blue",
+            )
+        )
+
+        # Stats Panel
+        stats_table = Table.grid(expand=True)
+        stats_table.add_row(self.progress) if self.progress else None
+
+        elapsed = asyncio.get_event_loop().time() - self.start_time
+        pages_per_sec = self.pages_completed / elapsed if elapsed > 0 else 0
+
+        summary_table = Table(box=None, expand=True)
+        summary_table.add_column("Métrica", style="dim")
+        summary_table.add_column("Valor", justify="right")
+        summary_table.add_row("Páginas/seg", f"{pages_per_sec:.2f}")
+        summary_table.add_row("Visto (URLs)", f"{len(self.seen_urls)}")
+        summary_table.add_row("Visto (Assets)", f"{len(self.seen_assets)}")
+
+        layout["stats"].update(
+            Panel(
+                Layout(stats_table), title="[bold]ESTADO ACTUAL[/]", border_style="cyan"
+            )
+        )
+
+        # Activity Panel
+        activity_table = Table(box=None, expand=True)
+        activity_table.add_column("Título", ratio=3, style="bold white")
+        activity_table.add_column("Motor", ratio=1, justify="center")
+
+        for entry in self.activity_log[-6:]:
+            color = "green" if entry["engine"] == "trafilatura" else "yellow"
+            title = (
+                (entry["title"][:45] + "..")
+                if len(entry["title"]) > 45
+                else entry["title"]
+            )
+            activity_table.add_row(title, f"[{color}]{entry['engine']}[/]")
+
+        layout["activity"].update(
+            Panel(
+                activity_table,
+                title="[bold green]ÚLTIMAS INGESTAS[/]",
+                border_style="green",
+            )
+        )
+
+    async def log_event(self, data: WebPage, engine: str = "unknown") -> None:
+        report_path = self.asset_extractor.data_dir / "migration_audit.jsonl"
+
+        # Actualizar log visual interno
+        self.activity_log.append(
+            {
+                "title": data.title,
+                "engine": engine,
+                "time": asyncio.get_event_loop().time(),
+            }
+        )
+
         async with self.report_lock:
             async with aiofiles.open(report_path, "a", encoding="utf-8") as f:
                 await f.write(json.dumps(data.model_dump(mode="json")) + "\n")
@@ -90,9 +173,9 @@ class UIFMigrationEngine:
 
         pending = await self.state.get_pending_urls(max_retries=self.config.max_retries)
         if not pending and not self.seen_urls:
-            await self.state.add_url(self.base_url, MigrationStatus.PENDING)
-            self.seen_urls.add(self.base_url)
-            pending = [self.base_url]
+            await self.state.add_url(self.navigation.base_url, MigrationStatus.PENDING)
+            self.seen_urls.add(self.navigation.base_url)
+            pending = [self.navigation.base_url]
 
         for url in pending:
             await self.url_queue.put(url)
@@ -130,7 +213,7 @@ class UIFMigrationEngine:
                 )
 
     async def process_page(self, session: AsyncStealthySession, url: str) -> None:
-        if not self.circuit_breaker.should_allow(self.domain):
+        if not self.circuit_breaker.should_allow(self.navigation.domain):
             logger.warning(f"Circuit broken. Skipping {url}")
             await self.url_queue.put(url)
             await asyncio.sleep(1)
@@ -146,7 +229,10 @@ class UIFMigrationEngine:
                     encoded_url,
                     impersonate="chrome",
                     timeout=self.config.timeout_seconds,
-                    headers={"Referer": self.base_url, "Origin": self.base_url},
+                    headers={
+                        "Referer": self.navigation.base_url,
+                        "Origin": self.navigation.base_url,
+                    },
                 )
                 if resp.status == 500:
                     await self.state.update_status(
@@ -164,7 +250,7 @@ class UIFMigrationEngine:
             if not page:
                 raise Exception("Empty content")
 
-            self.circuit_breaker.record_success(self.domain)
+            self.circuit_breaker.record_success(self.navigation.domain)
             raw_html = getattr(page, "raw_content", "") or getattr(page, "body", "")
             if not isinstance(raw_html, str):
                 raw_html = raw_html.decode("utf-8", errors="replace")
@@ -180,87 +266,41 @@ class UIFMigrationEngine:
             text_data = await text_task
 
             path_slug = slugify(
-                url.replace(self.base_url, "").replace(".php", "") or "index"
+                url.replace(self.navigation.base_url, "").replace(".php", "") or "index"
             )
-            md_path = self.project_dir / "content" / f"{path_slug}.md"
+            md_path = self.asset_extractor.data_dir / "content" / f"{path_slug}.md"
             md_path.parent.mkdir(parents=True, exist_ok=True)
-
-            import yaml
 
             frontmatter = yaml.dump(metadata, allow_unicode=True, sort_keys=False)
             async with aiofiles.open(md_path, "w", encoding="utf-8") as f:
                 await f.write(f"---\n{frontmatter}---\n\n{text_data['markdown']}")
 
-            new_assets = []
-            new_pages = []
-            links = [str(node) for node in page.css("a::attr(href)")]
-            images = [str(node) for node in page.css("img::attr(src)")]
+            new_pages, new_assets = self.navigation.extract_links(page, url)
 
-            for link in links + images:
-                if not link:
-                    continue
-                full_url = urljoin(url, str(link)).split("#")[0]
-                parsed_link = urlparse(full_url)
-                if parsed_link.netloc != self.domain:
-                    continue
+            new_assets_filtered = [
+                a
+                for a in new_assets
+                if a not in self.seen_assets and self.extract_assets
+            ]
+            new_pages_filtered = [p for p in new_pages if p not in self.seen_urls]
 
-                is_asset = any(
-                    full_url.lower().endswith(ext)
-                    for ext in [
-                        ".pdf",
-                        ".jpg",
-                        ".png",
-                        ".jpeg",
-                        ".gif",
-                        ".svg",
-                        ".webp",
-                    ]
-                )
-                should_follow = False
-                if is_asset:
-                    should_follow = True
-                elif self.scope == ScrapingScope.BROAD:
-                    should_follow = True
-                elif self.scope == ScrapingScope.STRICT:
-                    if full_url.startswith(self.base_url):
-                        should_follow = True
-                elif self.scope == ScrapingScope.SMART:
-                    path_parts = urlparse(self.base_url).path.strip("/").split("/")
-                    path_depth = len([p for p in path_parts if p])
-                    if path_depth >= 1:
-                        if full_url.startswith(self.base_url):
-                            should_follow = True
-                    else:
-                        should_follow = True
-
-                if not should_follow:
-                    continue
-                if is_asset:
-                    if self.extract_assets:
-                        if full_url not in self.seen_assets:
-                            self.seen_assets.add(full_url)
-                            new_assets.append(full_url)
-                else:
-                    if not any(
-                        full_url.lower().endswith(x)
-                        for x in [".css", ".js", ".json", ".xml", ".ico"]
-                    ):
-                        if full_url not in self.seen_urls:
-                            self.seen_urls.add(full_url)
-                            new_pages.append(full_url)
+            for a in new_assets_filtered:
+                self.seen_assets.add(a)
+            for p in new_pages_filtered:
+                self.seen_urls.add(p)
 
             assets_to_add = [
-                (asset, MigrationStatus.PENDING, "asset") for asset in new_assets
+                (a, MigrationStatus.PENDING, "asset") for a in new_assets_filtered
             ]
             pages_to_add = [
-                (p_url, MigrationStatus.PENDING, "webpage") for p_url in new_pages
+                (p, MigrationStatus.PENDING, "webpage") for p in new_pages_filtered
             ]
             await self.state.add_urls_batch(assets_to_add + pages_to_add)
 
-            for asset in new_assets:
-                await self.asset_queue.put(asset)
-            for p_url in new_pages:
-                await self.url_queue.put(p_url)
+            for a in new_assets_filtered:
+                await self.asset_queue.put(a)
+            for p in new_pages_filtered:
+                await self.url_queue.put(p)
 
             await self.state.update_status(url, MigrationStatus.COMPLETED)
             self.pages_completed += 1
@@ -280,12 +320,13 @@ class UIFMigrationEngine:
                     url=url,
                     title=metadata["title"],
                     content_md_path=str(md_path),
-                    assets=new_assets,
-                )
+                    assets=new_assets_filtered,
+                ),
+                engine=text_data["engine"],
             )
 
         except Exception as e:
-            self.circuit_breaker.record_failure(self.domain)
+            self.circuit_breaker.record_failure(self.navigation.domain)
             current_retries = await self.state.increment_retry(url)
             logger.warning(
                 f"Retry {current_retries}/{self.config.max_retries} for {url}: {e}"
@@ -314,86 +355,6 @@ class UIFMigrationEngine:
             finally:
                 self.asset_queue.task_done()
 
-    async def generate_summary(self) -> None:
-        from rich.table import Table
-        from rich.panel import Panel
-        from rich.rule import Rule
-
-        console.print("\n")
-        console.print(Rule(title="[bold blue]🚀 INGESTIÓN FINALIZADA[/]", style="blue"))
-        console.print("\n")
-
-        async with self.state.pool.acquire() as db:
-            cursor = await db.execute(
-                "SELECT status, COUNT(*) as count FROM urls GROUP BY status"
-            )
-            rows = await cursor.fetchall()
-
-            if rows:
-                status_table = Table(
-                    title="[bold cyan]📊 Resumen de Ejecución[/]",
-                    box=None,
-                    header_style="bold magenta",
-                    expand=False,
-                )
-                status_table.add_column("Estado", justify="left")
-                status_table.add_column("Cantidad", justify="right", style="bold")
-
-                total = 0
-                for status_val, count in rows:
-                    total += count
-                    color = "green" if status_val == "completed" else "yellow"
-                    if status_val == "failed":
-                        color = "red"
-                    icon = "✅" if status_val == "completed" else "⏳"
-                    if status_val == "failed":
-                        icon = "❌"
-                    status_table.add_row(
-                        f"{icon} {status_val.capitalize()}", str(count), style=color
-                    )
-
-                status_table.add_section()
-                status_table.add_row("Total Procesado", str(total), style="bold blue")
-                console.print(status_table)
-
-            console.print("\n")
-            cursor_fail = await db.execute(
-                "SELECT COALESCE(last_error, 'Unknown') as error, COUNT(*) as count FROM urls WHERE status='failed' GROUP BY last_error ORDER BY count DESC LIMIT 5"
-            )
-            rows_fail = await cursor_fail.fetchall()
-
-            if rows_fail:
-                fail_table = Table(
-                    title="[bold red]⚠️ Diagnóstico de Errores (Top 5)[/]",
-                    box=None,
-                    header_style="bold red",
-                    expand=True,
-                    border_style="red",
-                )
-                fail_table.add_column("Mensaje de Error", ratio=3)
-                fail_table.add_column("Ocurrencias", justify="right", ratio=1)
-                for err, count in rows_fail:
-                    fail_table.add_row(f"[dim]{err}[/]", f"[bold]{count}[/]")
-                console.print(
-                    Panel(
-                        fail_table,
-                        border_style="red",
-                        title="[bold white]ALERTA DE SISTEMA[/]",
-                    )
-                )
-            else:
-                console.print(
-                    Panel(
-                        "[bold green]✨ ¡Felicidades! Ingesta completada con 0 errores críticos.[/]",
-                        border_style="green",
-                        padding=(1, 2),
-                    )
-                )
-
-        console.print("\n")
-        console.print(Rule(style="blue"))
-        console.print("\n")
-
     async def run(self) -> None:
         await self.setup()
         dns_args = []
@@ -408,26 +369,30 @@ class UIFMigrationEngine:
 
         additional_args = {"args": dns_args + ["--disable-gpu", "--no-sandbox"]}
 
-        with Progress(
+        self.progress = Progress(
             SpinnerColumn(),
             TextColumn("[progress.description]{task.description}"),
-            BarColumn(),
+            BarColumn(bar_width=None),
             TextColumn("[progress.percentage]{task.percentage:>3.0f}%"),
             TextColumn("({task.completed}/{task.total})"),
-            console=console,
-        ) as progress:
-            self.progress = progress
-            self.page_task = progress.add_task(
-                "[cyan]Páginas",
-                total=len(self.seen_urls),
-                completed=self.pages_completed,
-            )
-            self.asset_task = progress.add_task(
-                "[magenta]Assets",
-                total=len(self.seen_assets),
-                completed=self.assets_completed,
-            )
+            TimeElapsedColumn(),
+            expand=True,
+        )
 
+        self.page_task = self.progress.add_task(
+            "[cyan]Páginas",
+            total=len(self.seen_urls),
+            completed=self.pages_completed,
+        )
+        self.asset_task = self.progress.add_task(
+            "[magenta]Assets",
+            total=len(self.seen_assets),
+            completed=self.assets_completed,
+        )
+
+        dashboard = self.create_layout()
+
+        with Live(dashboard, refresh_per_second=4, screen=False):
             async with AsyncStealthySession(
                 headless=True,
                 max_pages=self.config.default_workers,
@@ -438,7 +403,6 @@ class UIFMigrationEngine:
                     asyncio.create_task(self.page_worker(session))
                     for _ in range(self.config.default_workers)
                 ]
-
                 asset_workers = []
                 if self.extract_assets:
                     asset_workers = [
@@ -446,9 +410,23 @@ class UIFMigrationEngine:
                         for _ in range(self.config.asset_workers)
                     ]
 
+                while not (
+                    self.url_queue.empty()
+                    and self.asset_queue.empty()
+                    and all(w.done() for w in page_workers + asset_workers)
+                ):
+                    self.update_layout(dashboard)
+                    await asyncio.sleep(0.25)
+                    if self.url_queue.empty() and self.asset_queue.empty():
+                        # Verificar si hay workers procesando realmente
+                        await asyncio.sleep(1)
+                        if self.url_queue.empty() and self.asset_queue.empty():
+                            break
+
                 await self.url_queue.join()
-                await self.asset_queue.join()
+                if self.extract_assets:
+                    await self.asset_queue.join()
                 for w in page_workers + asset_workers:
                     w.cancel()
 
-        await self.generate_summary()
+        await self.reporter.generate_summary()
