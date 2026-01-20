@@ -35,6 +35,7 @@ class UIFMigrationEngine:
         scope: ScrapingScope = ScrapingScope.SMART,
         circuit_breaker: Optional[CircuitBreaker] = None,
         project_dir: Optional[Path] = None,
+        extract_assets: bool = True,
     ):
         self.config = config
         self.state = state
@@ -47,6 +48,7 @@ class UIFMigrationEngine:
         self.circuit_breaker = circuit_breaker or CircuitBreaker()
         self.project_dir = project_dir or config.data_dir / slugify(self.domain)
         self.project_dir.mkdir(parents=True, exist_ok=True)
+        self.extract_assets = extract_assets
 
         self.url_queue: asyncio.Queue[str] = asyncio.Queue()
         self.asset_queue: asyncio.Queue[str] = asyncio.Queue()
@@ -234,9 +236,10 @@ class UIFMigrationEngine:
                 if not should_follow:
                     continue
                 if is_asset:
-                    if full_url not in self.seen_assets:
-                        self.seen_assets.add(full_url)
-                        new_assets.append(full_url)
+                    if self.extract_assets:
+                        if full_url not in self.seen_assets:
+                            self.seen_assets.add(full_url)
+                            new_assets.append(full_url)
                 else:
                     if not any(
                         full_url.lower().endswith(x)
@@ -435,10 +438,14 @@ class UIFMigrationEngine:
                     asyncio.create_task(self.page_worker(session))
                     for _ in range(self.config.default_workers)
                 ]
-                asset_workers = [
-                    asyncio.create_task(self.asset_worker())
-                    for _ in range(self.config.asset_workers)
-                ]
+
+                asset_workers = []
+                if self.extract_assets:
+                    asset_workers = [
+                        asyncio.create_task(self.asset_worker())
+                        for _ in range(self.config.asset_workers)
+                    ]
+
                 await self.url_queue.join()
                 await self.asset_queue.join()
                 for w in page_workers + asset_workers:
