@@ -1,4 +1,3 @@
-import pytest
 from uif_scraper.utils.url_utils import smart_url_normalize, slugify
 
 

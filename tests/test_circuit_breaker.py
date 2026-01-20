@@ -1,4 +1,3 @@
-import pytest
 import time
 from uif_scraper.utils.circuit_breaker import CircuitBreaker
 

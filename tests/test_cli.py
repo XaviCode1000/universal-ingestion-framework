@@ -1,5 +1,4 @@
 import pytest
-import sys
 from unittest.mock import AsyncMock, patch, MagicMock
 from uif_scraper.cli import main_async
 
@@ -11,9 +10,7 @@ async def test_cli_setup_wizard():
             url=None, setup=True, config=None, scope="smart", workers=5
         )
 
-        with patch(
-            "uif_scraper.cli.run_wizard", new_callable=AsyncMock
-        ) as mock_wizard:
+        with patch("uif_scraper.cli.run_wizard", new_callable=AsyncMock) as mock_wizard:
             mock_wizard.return_value = MagicMock(
                 data_dir="data", log_rotation_mb=50, log_level="INFO"
             )

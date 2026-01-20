@@ -1,6 +1,5 @@
 import pytest
 import os
-from pathlib import Path
 from uif_scraper.extractors.asset_extractor import AssetExtractor
 
 

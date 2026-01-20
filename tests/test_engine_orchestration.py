@@ -1,7 +1,6 @@
 import pytest
-import asyncio
 from unittest.mock import AsyncMock, patch, MagicMock
-from uif_scraper.engine import UIFMigrationEngine, MigrationStatus
+from uif_scraper.engine import UIFMigrationEngine
 from uif_scraper.config import ScraperConfig
 from uif_scraper.db_pool import SQLitePool
 from uif_scraper.db_manager import StateManager

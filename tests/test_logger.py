@@ -1,5 +1,3 @@
-import pytest
-from pathlib import Path
 from uif_scraper.logger import setup_logger
 
 

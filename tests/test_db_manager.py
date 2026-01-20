@@ -1,5 +1,4 @@
 import pytest
-import os
 from uif_scraper.db_pool import SQLitePool
 from uif_scraper.db_manager import StateManager, MigrationStatus
 

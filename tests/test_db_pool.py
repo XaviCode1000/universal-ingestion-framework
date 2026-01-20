@@ -1,6 +1,5 @@
 import pytest
 import asyncio
-from pathlib import Path
 from uif_scraper.db_pool import SQLitePool
 
 

@@ -1,4 +1,3 @@
-import pytest
 from uif_scraper.utils.html_cleaner import pre_clean_html
 
 

@@ -1,5 +1,4 @@
 import pytest
-import aiosqlite
 from unittest.mock import MagicMock
 from uif_scraper.engine import UIFMigrationEngine
 from uif_scraper.config import ScraperConfig
@@ -29,7 +28,7 @@ async def test_engine_generate_summary(tmp_path):
     nav = NavigationService("https://test.com")
     rep = ReporterService(MagicMock(), state)
 
-    engine = UIFMigrationEngine(
+    _ = UIFMigrationEngine(
         config=config,
         state=state,
         text_extractor=MagicMock(),
