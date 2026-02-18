@@ -18,11 +18,12 @@ UIF is a high-fidelity knowledge ingestion engine designed to transform legacy w
 - **Intelligent Navigation (Scope Control)**: `SMART`, `STRICT`, and `BROAD` strategies to surgically control crawl scope (preventing leaks outside of sub-sites or specific documentation).
 - **Enriched RAG Context**: Automatic injection of **YAML Frontmatter** (URL, author, date, title) into every file for seamless indexing in vector databases.
 - **Industrial Resilience**: State management using **SQLite in WAL mode**, allowing real concurrency and automatic recovery from failures.
+- **Graceful Shutdown**: Clean process termination with `SIGTERM`/`SIGINT` signal handling, ensuring no data loss during interruptions.
 - **Conversational UX**: Interactive Wizard for guided configuration of scope, processes, and content types.
 
 ---
 
-## 🏗️ TECHNICAL ARCHITECTURE (v3.0.0 - Modular Enterprise)
+## 🏗️ TECHNICAL ARCHITECTURE (v3.0.1 - Modular Enterprise)
 
 The engine operates across four layers of refinement:
 
@@ -30,6 +31,13 @@ The engine operates across four layers of refinement:
 2. **Purification Layer (Selectolax + Density Analysis)**: Massive noise elimination via static selectors and a **Link Density Algorithm** that detects and removes menus/sidebars even in non-semantic sites.
 3. **Hybrid Conversion Layer**: Dynamic selection of the best engine with a **Waterfall Title Strategy** to guarantee accurate metadata, using **Trafilatura** and **MarkItDown**.
 4. **Refinement Layer (ftfy + YAML)**: Final text normalization (mojibake fix) and structured metadata enrichment for maximum compatibility with RAG systems.
+
+### Key Technical Features
+
+- **Python 3.12+ Type Hints**: Modern syntax (`list[]`, `dict[]`, `X | None`) for better code clarity.
+- **Immutable Data Models**: Pydantic models with `frozen=True` for thread-safe data handling.
+- **Memory Optimized**: `__slots__` in high-frequency classes like `CircuitBreaker`.
+- **Async-First**: Built with `asyncio.TaskGroup` patterns and semaphore-based concurrency control.
 
 ---
 
@@ -93,6 +101,16 @@ For automated workflows or shell scripts:
 uv run uif-scraper https://example.com --workers 10 --scope smart
 ```
 
+### CLI Options
+
+| Option | Description |
+|--------|-------------|
+| `--setup` | Run interactive configuration wizard |
+| `--config <path>` | Use custom config file |
+| `--scope <smart\|strict\|broad>` | Set crawl scope |
+| `--workers <n>` | Number of concurrent workers |
+| `--only-text` | Skip asset downloads |
+
 ---
 
 ## 📁 OUTPUT STRUCTURE
@@ -118,6 +136,13 @@ To perform a controlled purge of the data environment and caches before a new mi
 ```bash
 uv run clean.py
 ```
+
+---
+
+## 📚 Documentation
+
+- [CHANGELOG.md](docs/CHANGELOG.md) - Version history and changes
+- [MIGRATION_GUIDE.md](docs/MIGRATION_GUIDE.md) - Migration guide from v2.2 to v3.0
 
 ---
 

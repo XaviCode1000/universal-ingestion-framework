@@ -18,11 +18,12 @@ UIF es un motor de ingesta de conocimiento de alta fidelidad diseñado para tran
 - **Navegación Inteligente (Scope Control)**: Estrategias `SMART`, `STRICT` y `BROAD` para controlar con precisión quirúrgica el alcance del rastreo (evitando salir de sub-sitios o documentación específica).
 - **Contexto RAG Enriquecido**: Inyección automática de **YAML Frontmatter** (URL, autor, fecha, título) en cada archivo para facilitar la indexación en bases de datos vectoriales.
 - **Resiliencia Industrial**: Gestión de estado mediante **SQLite en modo WAL**, permitiendo concurrencia real y recuperación automática tras fallos.
+- **Cierre Controlado (Graceful Shutdown)**: Terminación limpia del proceso con manejo de señales `SIGTERM`/`SIGINT`, garantizando que no se pierdan datos durante interrupciones.
 - **UX Conversacional**: Asistente interactivo (Wizard) para configuración guiada de alcance, procesos y tipos de contenido.
 
 ---
 
-## 🏗️ ARQUITECTURA TÉCNICA (Pipeline v3.0.0 - Modular Enterprise)
+## 🏗️ ARQUITECTURA TÉCNICA (Pipeline v3.0.1 - Modular Enterprise)
 
 El motor opera en cuatro capas de refinamiento:
 
@@ -30,6 +31,13 @@ El motor opera en cuatro capas de refinamiento:
 2. **Capa de Purificación (Selectolax + Density Analysis)**: Eliminación masiva de ruido mediante selectores estáticos y un **Algoritmo de Densidad de Enlaces** que detecta y elimina menús/sidebars incluso en sitios no semánticos.
 3. **Capa de Conversión Híbrida**: Selección dinámica del mejor motor con **Estrategia de Título en Cascada** (Waterfall) para garantizar metadatos precisos, usando **Trafilatura** y **MarkItDown**.
 4. **Capa de Refinamiento (ftfy + YAML)**: Normalización final del texto (mojibake fix) y enriquecimiento con metadatos estructurados para máxima compatibilidad con sistemas RAG.
+
+### Características Técnicas Clave
+
+- **Type Hints Python 3.12+**: Sintaxis moderna (`list[]`, `dict[]`, `X | None`) para mayor claridad en el código.
+- **Modelos de Datos Inmutables**: Modelos Pydantic con `frozen=True` para manejo de datos thread-safe.
+- **Memoria Optimizada**: `__slots__` en clases de alta frecuencia como `CircuitBreaker`.
+- **Async-First**: Construido con patrones `asyncio.TaskGroup` y control de concurrencia basado en semáforos.
 
 ---
 
@@ -93,6 +101,16 @@ Para flujos de trabajo automatizados o scripts de shell:
 uv run uif-scraper https://ejemplo.com --workers 10 --scope smart
 ```
 
+### Opciones CLI
+
+| Opción | Descripción |
+|--------|-------------|
+| `--setup` | Ejecutar wizard de configuración interactiva |
+| `--config <ruta>` | Usar archivo de configuración personalizado |
+| `--scope <smart\|strict\|broad>` | Definir alcance del rastreo |
+| `--workers <n>` | Número de workers concurrentes |
+| `--only-text` | Omitir descarga de assets |
+
 ---
 
 ## 📁 ESTRUCTURA DE SALIDA
@@ -118,6 +136,13 @@ Para realizar una purga controlada del entorno de datos y caches antes de una nu
 ```bash
 uv run clean.py
 ```
+
+---
+
+## 📚 Documentación
+
+- [CHANGELOG.md](docs/CHANGELOG.md) - Historial de versiones y cambios
+- [MIGRATION_GUIDE.md](docs/MIGRATION_GUIDE.md) - Guía de migración de v2.2 a v3.0
 
 ---
 
