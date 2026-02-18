@@ -3,6 +3,7 @@
 [![Python 3.12+](https://img.shields.io/badge/python-3.12+-blue.svg)](https://www.python.org/downloads/)
 [![Architecture: Multi-Layer](https://img.shields.io/badge/architecture-multi--layer-orange.svg)]()
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)]()
+[![Tests: 75 passing](https://img.shields.io/badge/tests-75%20passing-brightgreen.svg)]()
 
 [🇪🇸 Leer en Español](README.es.md)
 
@@ -32,6 +33,35 @@ The engine operates across four layers of refinement:
 
 ---
 
+## 🧪 TESTING
+
+UIF includes a comprehensive test suite with **75+ tests** covering unit, integration, and end-to-end scenarios:
+
+```bash
+# Run all tests
+uv run pytest tests/ -v
+
+# Run quick tests only (skip browser-based e2e)
+uv run pytest tests/ -v -k "not browser"
+
+# Run with coverage report
+uv run pytest tests/ -v --cov=uif_scraper --cov-report=html
+
+# Run only end-to-end tests (requires internet)
+uv run pytest tests/test_e2e.py tests/test_e2e_browser.py -v
+```
+
+### Test Coverage
+
+| Category | Tests | Description |
+|----------|-------|-------------|
+| Unit Tests | 51 | Navigation, extractors, DB, utils |
+| E2E (HTTP) | 4 | Real HTTP requests to webscraper.io |
+| E2E (Browser) | 3 | Full browser automation with Chromium |
+| Integration | 17 | Engine orchestration, shutdown, reporting |
+
+---
+
 ## 🚀 INSTALLATION AND USAGE
 
 This project uses `uv` for ultra-fast, deterministic dependency management.
@@ -40,6 +70,15 @@ This project uses `uv` for ultra-fast, deterministic dependency management.
 ```bash
 # Install uv if you don't have it
 curl -LsSf https://astral.sh/uv/install.sh | sh
+
+# Install dependencies and lock file
+uv sync
+```
+
+### Browser Setup (Optional - for E2E tests with browser)
+```bash
+# Install Chromium for Playwright (required for browser-based E2E tests)
+uv run playwright install chromium
 ```
 
 ### Interactive Execution (Recommended)

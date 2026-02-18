@@ -1,15 +1,20 @@
-import pytest
 import asyncio
-from unittest.mock import MagicMock, AsyncMock
-from uif_scraper.engine import UIFMigrationEngine
+from unittest.mock import AsyncMock, MagicMock
+
+import pytest
+
 from uif_scraper.config import ScraperConfig
 from uif_scraper.db_manager import StateManager
 from uif_scraper.db_pool import SQLitePool
-from uif_scraper.extractors.text_extractor import TextExtractor
-from uif_scraper.extractors.metadata_extractor import MetadataExtractor
+from uif_scraper.engine import UIFMigrationEngine
 from uif_scraper.extractors.asset_extractor import AssetExtractor
+from uif_scraper.extractors.metadata_extractor import MetadataExtractor
+from uif_scraper.extractors.text_extractor import TextExtractor
 from uif_scraper.navigation import NavigationService
 from uif_scraper.reporter import ReporterService
+
+# Valid test URLs from webscraper.io (designed for scraper testing)
+TEST_URL = "https://webscraper.io/test-sites/e-commerce/static"
 
 
 @pytest.mark.asyncio
@@ -23,7 +28,7 @@ async def test_engine_simple_run(tmp_path):
     metadata_extractor = MetadataExtractor()
     asset_extractor = AssetExtractor(tmp_path)
 
-    nav = NavigationService("https://test.com")
+    nav = NavigationService(TEST_URL)
     rep = ReporterService(MagicMock(), state)
 
     engine = UIFMigrationEngine(
@@ -37,7 +42,7 @@ async def test_engine_simple_run(tmp_path):
     )
 
     engine.setup = AsyncMock()
-    await engine.url_queue.put("https://test.com/page1")
+    await engine.url_queue.put(f"{TEST_URL}/page1")
     engine.process_page = AsyncMock()
 
     session = AsyncMock()

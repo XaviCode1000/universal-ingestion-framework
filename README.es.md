@@ -3,6 +3,7 @@
 [![Python 3.12+](https://img.shields.io/badge/python-3.12+-blue.svg)](https://www.python.org/downloads/)
 [![Architecture: Multi-Layer](https://img.shields.io/badge/architecture-multi--layer-orange.svg)]()
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)]()
+[![Tests: 75 passing](https://img.shields.io/badge/tests-75%20passing-brightgreen.svg)]()
 
 [🇺🇸 Leer en Inglés](README.md)
 
@@ -21,7 +22,7 @@ UIF es un motor de ingesta de conocimiento de alta fidelidad diseñado para tran
 
 ---
 
-## 🏗️ ARQUITECTURA TÉCNICA (Pipeline v2.2 - The Signal Master)
+## 🏗️ ARQUITECTURA TÉCNICA (Pipeline v3.0.0 - Modular Enterprise)
 
 El motor opera en cuatro capas de refinamiento:
 
@@ -29,6 +30,35 @@ El motor opera en cuatro capas de refinamiento:
 2. **Capa de Purificación (Selectolax + Density Analysis)**: Eliminación masiva de ruido mediante selectores estáticos y un **Algoritmo de Densidad de Enlaces** que detecta y elimina menús/sidebars incluso en sitios no semánticos.
 3. **Capa de Conversión Híbrida**: Selección dinámica del mejor motor con **Estrategia de Título en Cascada** (Waterfall) para garantizar metadatos precisos, usando **Trafilatura** y **MarkItDown**.
 4. **Capa de Refinamiento (ftfy + YAML)**: Normalización final del texto (mojibake fix) y enriquecimiento con metadatos estructurados para máxima compatibilidad con sistemas RAG.
+
+---
+
+## 🧪 TESTING
+
+UIF incluye una suite de tests completa con **75+ tests** cubriendo escenarios unitarios, de integración y end-to-end:
+
+```bash
+# Ejecutar todos los tests
+uv run pytest tests/ -v
+
+# Solo tests rápidos (sin browser e2e)
+uv run pytest tests/ -v -k "not browser"
+
+# Con reporte de cobertura
+uv run pytest tests/ -v --cov=uif_scraper --cov-report=html
+
+# Solo tests end-to-end (requiere internet)
+uv run pytest tests/test_e2e.py tests/test_e2e_browser.py -v
+```
+
+### Cobertura de Tests
+
+| Categoría | Tests | Descripción |
+|-----------|-------|-------------|
+| Unit Tests | 51 | Navegación, extractores, DB, utils |
+| E2E (HTTP) | 4 | Peticiones HTTP reales a webscraper.io |
+| E2E (Browser) | 3 | Automatización completa con Chromium |
+| Integration | 17 | Orquestación del engine, shutdown, reportes |
 
 ---
 
@@ -40,6 +70,15 @@ Este proyecto utiliza `uv` para una gestión de dependencias ultrarrápida y det
 ```bash
 # Instalar uv si no lo tienes
 curl -LsSf https://astral.sh/uv/install.sh | sh
+
+# Instalar dependencias y lock file
+uv sync
+```
+
+### Configuración del Navegador (Opcional - para tests E2E con browser)
+```bash
+# Instalar Chromium para Playwright (requerido para tests E2E con browser)
+uv run playwright install chromium
 ```
 
 ### Ejecución Interactiva (Recomendado)

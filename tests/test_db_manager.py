@@ -1,6 +1,10 @@
 import pytest
+
+from uif_scraper.db_manager import MigrationStatus, StateManager
 from uif_scraper.db_pool import SQLitePool
-from uif_scraper.db_manager import StateManager, MigrationStatus
+
+# Valid test URLs from webscraper.io (designed for scraper testing)
+TEST_URL = "https://webscraper.io/test-sites/e-commerce/static"
 
 
 @pytest.mark.asyncio
@@ -25,17 +29,16 @@ async def test_state_manager_add_update(tmp_path):
     state = StateManager(pool)
     await state.initialize()
 
-    url = "https://test.com"
-    await state.add_url(url, MigrationStatus.PENDING)
+    await state.add_url(TEST_URL, MigrationStatus.PENDING)
 
     pending = await state.get_pending_urls()
-    assert url in pending
+    assert TEST_URL in pending
 
-    await state.update_status(url, MigrationStatus.COMPLETED)
+    await state.update_status(TEST_URL, MigrationStatus.COMPLETED)
     pending = await state.get_pending_urls()
-    assert url not in pending
+    assert TEST_URL not in pending
 
-    new_retry = await state.increment_retry(url)
+    new_retry = await state.increment_retry(TEST_URL)
     assert new_retry == 1
 
     await pool.close_all()

@@ -1,14 +1,20 @@
+from unittest.mock import AsyncMock, MagicMock, patch
+
 import pytest
-from unittest.mock import AsyncMock, patch, MagicMock
-from uif_scraper.engine import UIFMigrationEngine, MigrationStatus
+
 from uif_scraper.config import ScraperConfig
 from uif_scraper.db_manager import StateManager
 from uif_scraper.db_pool import SQLitePool
-from uif_scraper.extractors.text_extractor import TextExtractor
-from uif_scraper.extractors.metadata_extractor import MetadataExtractor
+from uif_scraper.engine import UIFMigrationEngine, MigrationStatus
 from uif_scraper.extractors.asset_extractor import AssetExtractor
+from uif_scraper.extractors.metadata_extractor import MetadataExtractor
+from uif_scraper.extractors.text_extractor import TextExtractor
+from uif_scraper.models import ScrapingScope
 from uif_scraper.navigation import NavigationService
 from uif_scraper.reporter import ReporterService
+
+# Valid test URLs from webscraper.io (designed for scraper testing)
+TEST_URL = "https://webscraper.io/test-sites/e-commerce/static"
 
 
 @pytest.mark.asyncio
@@ -23,7 +29,8 @@ async def test_engine_process_page_full(tmp_path):
     metadata_extractor = MetadataExtractor()
     asset_extractor = AssetExtractor(tmp_path)
 
-    nav = NavigationService("https://test.com")
+    # Use BROAD scope to allow all links within the domain
+    nav = NavigationService(TEST_URL, scope=ScrapingScope.BROAD)
     rep = ReporterService(MagicMock(), state)
 
     engine = UIFMigrationEngine(
@@ -36,13 +43,18 @@ async def test_engine_process_page_full(tmp_path):
         reporter_service=rep,
     )
 
-    await state.add_url("https://test.com", MigrationStatus.PENDING)
+    await state.add_url(TEST_URL, MigrationStatus.PENDING)
     mock_resp = MagicMock()
     mock_resp.status = 200
     mock_resp.body = '<html><body><h1>Title</h1><p>Content</p><a href="/other">Link</a><img src="/img.png"></body></html>'
     mock_resp.raw_content = None
+    # Mock css selector to return link nodes
     mock_resp.css = MagicMock(
-        side_effect=lambda selector: ["/other" if "href" in selector else "/img.png"]
+        side_effect=lambda selector: (
+            [MagicMock(__str__=lambda s: "/other")]
+            if "href" in selector
+            else [MagicMock(__str__=lambda s: "/img.png")]
+        )
     )
 
     with patch(
@@ -50,13 +62,13 @@ async def test_engine_process_page_full(tmp_path):
     ) as mock_get:
         mock_get.return_value = mock_resp
         session = AsyncMock()
-        await engine.process_page(session, "https://test.com")
-        assert "https://test.com/other" in engine.seen_urls
-        assert "https://test.com/img.png" in engine.seen_assets
+        await engine.process_page(session, TEST_URL)
+        assert "https://webscraper.io/other" in engine.seen_urls
+        assert "https://webscraper.io/img.png" in engine.seen_assets
 
         async with pool.acquire() as db:
             async with db.execute(
-                "SELECT status FROM urls WHERE url='https://test.com'"
+                f"SELECT status FROM urls WHERE url='{TEST_URL}'"
             ) as cursor:
                 row = await cursor.fetchone()
                 assert row is not None

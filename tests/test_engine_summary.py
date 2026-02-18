@@ -1,11 +1,16 @@
-import pytest
 from unittest.mock import MagicMock
-from uif_scraper.engine import UIFMigrationEngine
+
+import pytest
+
 from uif_scraper.config import ScraperConfig
-from uif_scraper.db_pool import SQLitePool
 from uif_scraper.db_manager import StateManager
+from uif_scraper.db_pool import SQLitePool
+from uif_scraper.engine import UIFMigrationEngine
 from uif_scraper.navigation import NavigationService
 from uif_scraper.reporter import ReporterService
+
+# Valid test URLs from webscraper.io (designed for scraper testing)
+TEST_URL = "https://webscraper.io/test-sites/e-commerce/static"
 
 
 @pytest.mark.asyncio
@@ -25,7 +30,7 @@ async def test_engine_generate_summary(tmp_path):
         )
         await db.commit()
 
-    nav = NavigationService("https://test.com")
+    nav = NavigationService(TEST_URL)
     rep = ReporterService(MagicMock(), state)
 
     _ = UIFMigrationEngine(
