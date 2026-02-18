@@ -1,6 +1,6 @@
 from enum import Enum
-from typing import List
-from pydantic import BaseModel, Field
+
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class ScrapingScope(str, Enum):
@@ -17,8 +17,12 @@ class MigrationStatus(str, Enum):
 
 
 class WebPage(BaseModel):
+    """Immutable schema for web page extraction results."""
+
+    model_config = ConfigDict(frozen=True)
+
     url: str
     title: str = Field(default="Sin Título")
     content_md_path: str
-    assets: List[str] = Field(default_factory=list)
+    assets: list[str] = Field(default_factory=list)
     status: MigrationStatus = MigrationStatus.COMPLETED

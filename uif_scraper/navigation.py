@@ -1,5 +1,6 @@
 from urllib.parse import urljoin, urlparse
-from typing import List, Any
+from typing import Any
+
 from uif_scraper.models import ScrapingScope
 
 
@@ -51,12 +52,12 @@ class NavigationService:
 
     def extract_links(
         self, html_parser: Any, current_url: str
-    ) -> tuple[List[str], List[str]]:
+    ) -> tuple[list[str], list[str]]:
         links = [str(node) for node in html_parser.css("a::attr(href)")]
         images = [str(node) for node in html_parser.css("img::attr(src)")]
 
-        new_pages: List[str] = []
-        new_assets: List[str] = []
+        new_pages: list[str] = []
+        new_assets: list[str] = []
 
         for link in links + images:
             if not link:

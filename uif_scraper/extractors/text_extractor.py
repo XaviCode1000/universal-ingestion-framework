@@ -1,7 +1,11 @@
 import io
+import logging
+from typing import Any
+
 import trafilatura
+from loguru import logger
 from markitdown import MarkItDown
-from typing import Any, Dict
+
 from uif_scraper.extractors.base import IExtractor
 from uif_scraper.utils.text_utils import clean_text
 
@@ -10,7 +14,7 @@ class TextExtractor(IExtractor):
     def __init__(self) -> None:
         self.md_converter = MarkItDown()
 
-    async def extract(self, content: Any, url: str) -> Dict[str, Any]:
+    async def extract(self, content: Any, url: str) -> dict[str, Any]:
         if not content:
             return {"markdown": "", "engine": "none"}
 
@@ -30,7 +34,14 @@ class TextExtractor(IExtractor):
                 )
                 extracted_md = conversion_result.text_content
                 engine = "markitdown"
-            except Exception:
+            except Exception as e:
+                # Log warning with traceback only if DEBUG level is enabled
+                logger.warning(
+                    "MarkItDown fallback failed for %s: %s",
+                    url,
+                    e,
+                    exc_info=logger.isEnabledFor(logging.DEBUG),
+                )
                 extracted_md = extracted_md or ""
                 engine = "trafilatura-fallback"
 

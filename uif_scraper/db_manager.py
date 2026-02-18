@@ -1,4 +1,3 @@
-from typing import List, Optional
 from uif_scraper.db_pool import SQLitePool
 from uif_scraper.models import MigrationStatus
 
@@ -37,7 +36,7 @@ class StateManager:
             await db.commit()
 
     async def add_urls_batch(
-        self, urls: List[tuple[str, MigrationStatus, str]]
+        self, urls: list[tuple[str, MigrationStatus, str]]
     ) -> None:
         if not urls:
             return
@@ -49,7 +48,7 @@ class StateManager:
             await db.commit()
 
     async def update_status(
-        self, url: str, status: MigrationStatus, error_msg: Optional[str] = None
+        self, url: str, status: MigrationStatus, error_msg: str | None = None
     ) -> None:
         async with self.pool.acquire() as db:
             if error_msg:
@@ -79,7 +78,7 @@ class StateManager:
 
     async def get_pending_urls(
         self, m_type: str = "webpage", max_retries: int = 3
-    ) -> List[str]:
+    ) -> list[str]:
         async with self.pool.acquire() as db:
             query = """
                 SELECT url FROM urls 

@@ -1,10 +1,12 @@
-from typing import Any, Dict
 from pathlib import Path
+from typing import Any
+
+import ftfy
+import yaml
+from markitdown import MarkItDown
+
 from uif_scraper.extractors.base import IExtractor
 from uif_scraper.utils.url_utils import slugify
-from markitdown import MarkItDown
-import yaml
-import ftfy
 
 
 class AssetExtractor(IExtractor):
@@ -12,7 +14,7 @@ class AssetExtractor(IExtractor):
         self.data_dir = data_dir
         self.md_converter = MarkItDown()
 
-    async def extract(self, content: bytes, url: str) -> Dict[str, Any]:
+    async def extract(self, content: bytes, url: str) -> dict[str, Any]:
         parsed_url = Path(url)
         ext = parsed_url.suffix.lower()
         filename = f"{slugify(parsed_url.stem or 'asset')}{ext}"
@@ -26,7 +28,11 @@ class AssetExtractor(IExtractor):
         with open(local_path, "wb") as f:
             f.write(content)
 
-        result = {"local_path": str(local_path), "filename": filename, "extension": ext}
+        result: dict[str, Any] = {
+            "local_path": str(local_path),
+            "filename": filename,
+            "extension": ext,
+        }
 
         if ext in [".pdf", ".docx", ".pptx", ".xlsx"]:
             try:

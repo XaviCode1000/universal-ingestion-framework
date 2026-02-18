@@ -1,21 +1,26 @@
 import time
-from typing import Dict
 
 
 class CircuitBreaker:
+    """Circuit breaker pattern for protecting against cascading failures.
+
+    Tracks failures per domain and blocks requests when threshold is exceeded.
+    """
+
+    __slots__ = ("threshold", "timeout", "failures", "blocked_until")
+
     def __init__(self, threshold: int = 5, timeout: float = 300.0):
         self.threshold = threshold
         self.timeout = timeout
-        self.failures: Dict[str, int] = {}
-        self.blocked_until: Dict[str, float] = {}
+        self.failures: dict[str, int] = {}
+        self.blocked_until: dict[str, float] = {}
 
     def should_allow(self, domain: str) -> bool:
         if domain in self.blocked_until:
             if time.time() < self.blocked_until[domain]:
                 return False
-            else:
-                del self.blocked_until[domain]
-                self.failures[domain] = 0
+            del self.blocked_until[domain]
+            self.failures[domain] = 0
         return True
 
     def record_failure(self, domain: str) -> None:

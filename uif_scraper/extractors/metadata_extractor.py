@@ -1,12 +1,14 @@
-from typing import Any, Dict, Optional
-from selectolax.parser import HTMLParser
-import trafilatura
-from uif_scraper.extractors.base import IExtractor
+from typing import Any
 from urllib.parse import urlparse
+
+import trafilatura
+from selectolax.parser import HTMLParser
+
+from uif_scraper.extractors.base import IExtractor
 
 
 class MetadataExtractor(IExtractor):
-    async def extract(self, content: Any, url: str) -> Dict[str, Any]:
+    async def extract(self, content: Any, url: str) -> dict[str, Any]:
         if not content or not isinstance(content, str):
             return {}
 
@@ -18,7 +20,7 @@ class MetadataExtractor(IExtractor):
         h1 = tree.css_first("h1")
 
         title: str = "Documento"
-        detected_title: Optional[str] = None
+        detected_title: str | None = None
 
         if og_title and og_title.attributes.get("content"):
             detected_title = og_title.attributes.get("content")

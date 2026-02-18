@@ -1,23 +1,29 @@
 import os
-import yaml
 from pathlib import Path
-from typing import Optional, Dict, Any
-from pydantic import BaseModel, Field, field_validator
+from typing import Any
 
 import questionary
+import yaml
+from pydantic import BaseModel, Field, field_validator
 from rich.console import Console
 
 console = Console()
 
 
 class ScraperConfig(BaseModel):
+    """Scraper configuration.
+
+    Deliberately NOT frozen: config values may be overridden
+    from environment variables or CLI args after instantiation.
+    """
+
     data_dir: Path = Field(default_factory=lambda: Path("data"))
     cache_dir: Path = Field(default_factory=lambda: Path("cache"))
     max_retries: int = 3
     timeout_seconds: int = 30
     default_workers: int = 5
     asset_workers: int = 8
-    dns_overrides: Dict[str, str] = Field(default_factory=dict)
+    dns_overrides: dict[str, str] = Field(default_factory=dict)
     log_rotation_mb: int = 50
     log_level: str = "INFO"
 
@@ -42,7 +48,7 @@ class ScraperConfig(BaseModel):
         return cls(**data)
 
 
-def get_config_path(custom_path: Optional[Path] = None) -> Path:
+def get_config_path(custom_path: Path | None = None) -> Path:
     if custom_path:
         return custom_path
 
@@ -66,7 +72,7 @@ def get_config_path(custom_path: Optional[Path] = None) -> Path:
 
 
 async def run_wizard() -> ScraperConfig:
-    console.print("[bold yellow]🛸 CONFIGURACIÓN DE ARGELIA SCRAPER v3.0[/]")
+    console.print("[bold yellow]🛸 CONFIGURACIÓN DE UIF SCRAPER v3.0[/]")
 
     data_dir = await questionary.text(
         "Directorio de datos (resultados):", default="data"
@@ -96,7 +102,7 @@ async def run_wizard() -> ScraperConfig:
     return config
 
 
-def load_config_with_overrides(custom_path: Optional[Path] = None) -> ScraperConfig:
+def load_config_with_overrides(custom_path: Path | None = None) -> ScraperConfig:
     config_path = get_config_path(custom_path)
     config = ScraperConfig.load(config_path)
 

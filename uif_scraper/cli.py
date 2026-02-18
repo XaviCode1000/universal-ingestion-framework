@@ -1,30 +1,60 @@
 import argparse
 import asyncio
+import contextlib
+import signal
 from pathlib import Path
-from typing import Optional
+from typing import Any
 from urllib.parse import urlparse
 
 import questionary
 from questionary import Choice
 from rich.console import Console
 
-from uif_scraper.config import load_config_with_overrides, run_wizard
+from uif_scraper.config import ScraperConfig, load_config_with_overrides, run_wizard
 from uif_scraper.db_manager import StateManager
 from uif_scraper.db_pool import SQLitePool
 from uif_scraper.engine import UIFMigrationEngine
-from uif_scraper.extractors.text_extractor import TextExtractor
-from uif_scraper.extractors.metadata_extractor import MetadataExtractor
 from uif_scraper.extractors.asset_extractor import AssetExtractor
+from uif_scraper.extractors.metadata_extractor import MetadataExtractor
+from uif_scraper.extractors.text_extractor import TextExtractor
 from uif_scraper.logger import setup_logger
 from uif_scraper.models import ScrapingScope
-from uif_scraper.utils.url_utils import slugify
 from uif_scraper.navigation import NavigationService
 from uif_scraper.reporter import ReporterService
+from uif_scraper.utils.url_utils import slugify
 
 console = Console()
 
 
-async def run_mission_wizard() -> Optional[dict]:
+def _setup_signal_handlers(shutdown_event: asyncio.Event) -> None:
+    """Setup SIGTERM and SIGINT handlers for graceful shutdown.
+
+    Uses asyncio's add_signal_handler on Unix for clean integration,
+    falls back to signal.signal on Windows.
+    """
+    loop = asyncio.get_running_loop()
+
+    try:
+        # Unix/Linux/Mac: use the clean asyncio API
+        for sig in (signal.SIGTERM, signal.SIGINT):
+            loop.add_signal_handler(sig, shutdown_event.set)
+    except NotImplementedError:
+        # Windows: fallback to sync API (cannot use add_signal_handler)
+        # Note: signal_handler runs in the main thread, so we need to
+        # schedule shutdown_event.set() in the event loop
+        def signal_handler(signum: int, frame: Any) -> None:  # noqa: ARG001
+            console.print(
+                "\n[yellow]⚠️  Shutdown signal received. Finishing current tasks...[/]"
+            )
+            # Schedule in event loop since we're in signal context
+            loop.call_soon_threadsafe(shutdown_event.set)
+
+        signal.signal(signal.SIGINT, signal_handler)
+        if hasattr(signal, "SIGTERM"):
+            signal.signal(signal.SIGTERM, signal_handler)
+
+
+async def run_mission_wizard() -> dict[str, Any] | None:
     console.print("\n[bold yellow]🚀 ASISTENTE DE MISIÓN UIF[/]")
 
     url = await questionary.text("URL base del sitio:").ask_async()
@@ -90,14 +120,12 @@ async def main_async() -> None:
         config.default_workers = args.workers
 
     # Resolver data_dir relativo al directorio actual de ejecución si no es absoluto
-    # Esto evita el anidamiento si se ejecuta desde carpetas inesperadas
     if not config.data_dir.is_absolute():
         config.data_dir = Path.cwd() / "data"
 
     setup_logger(config.data_dir, config.log_rotation_mb, config.log_level)
 
     domain_slug = slugify(urlparse(mission_url).netloc)
-    # Estructura: data/<domain_slug>/
     project_data_dir = config.data_dir / domain_slug
     project_data_dir.mkdir(parents=True, exist_ok=True)
 
@@ -123,9 +151,25 @@ async def main_async() -> None:
         extract_assets=mission_extract_assets,
     )
 
+    # Setup graceful shutdown
+    shutdown_event = asyncio.Event()
+    _setup_signal_handlers(shutdown_event)
+
+    # Connect shutdown event to engine
+    async def monitor_shutdown() -> None:
+        await shutdown_event.wait()
+        engine.request_shutdown()
+
+    shutdown_monitor = asyncio.create_task(monitor_shutdown())
+
     try:
         await engine.run()
+    except asyncio.CancelledError:
+        console.print("[yellow]⚠️  Operation cancelled by user[/]")
     finally:
+        shutdown_monitor.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await shutdown_monitor
         await pool.close_all()
 
 
@@ -133,7 +177,7 @@ def main() -> None:
     try:
         asyncio.run(main_async())
     except KeyboardInterrupt:
-        pass
+        console.print("\n[red]✋ Interrupted by user[/]")
 
 
 if __name__ == "__main__":

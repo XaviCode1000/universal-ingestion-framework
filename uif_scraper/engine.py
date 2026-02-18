@@ -1,6 +1,6 @@
 import asyncio
 import json
-from typing import Optional, Set, List
+from typing import Any
 
 import aiofiles
 import yaml
@@ -8,28 +8,28 @@ from loguru import logger
 from rich.layout import Layout
 from rich.live import Live
 from rich.panel import Panel
-from rich.table import Table
 from rich.progress import (
+    BarColumn,
     Progress,
     SpinnerColumn,
-    TextColumn,
-    BarColumn,
     TaskID,
+    TextColumn,
     TimeElapsedColumn,
 )
+from rich.table import Table
 from scrapling.fetchers import AsyncFetcher, AsyncStealthySession
 
 from uif_scraper.config import ScraperConfig
 from uif_scraper.db_manager import StateManager
-from uif_scraper.models import MigrationStatus, WebPage
-from uif_scraper.extractors.text_extractor import TextExtractor
-from uif_scraper.extractors.metadata_extractor import MetadataExtractor
 from uif_scraper.extractors.asset_extractor import AssetExtractor
-from uif_scraper.utils.url_utils import smart_url_normalize, slugify
-from uif_scraper.utils.html_cleaner import pre_clean_html
-from uif_scraper.utils.circuit_breaker import CircuitBreaker
+from uif_scraper.extractors.metadata_extractor import MetadataExtractor
+from uif_scraper.extractors.text_extractor import TextExtractor
+from uif_scraper.models import MigrationStatus, WebPage
 from uif_scraper.navigation import NavigationService
 from uif_scraper.reporter import ReporterService
+from uif_scraper.utils.circuit_breaker import CircuitBreaker
+from uif_scraper.utils.html_cleaner import pre_clean_html
+from uif_scraper.utils.url_utils import slugify, smart_url_normalize
 
 
 class UIFMigrationEngine:
@@ -43,7 +43,7 @@ class UIFMigrationEngine:
         navigation_service: NavigationService,
         reporter_service: ReporterService,
         extract_assets: bool = True,
-    ):
+    ) -> None:
         self.config = config
         self.state = state
         self.text_extractor = text_extractor
@@ -58,8 +58,8 @@ class UIFMigrationEngine:
         self.url_queue: asyncio.Queue[str] = asyncio.Queue()
         self.asset_queue: asyncio.Queue[str] = asyncio.Queue()
 
-        self.seen_urls: Set[str] = set()
-        self.seen_assets: Set[str] = set()
+        self.seen_urls: set[str] = set()
+        self.seen_assets: set[str] = set()
 
         self.pages_completed = 0
         self.assets_completed = 0
@@ -67,12 +67,15 @@ class UIFMigrationEngine:
         self.semaphore = asyncio.Semaphore(config.default_workers)
         self.report_lock = asyncio.Lock()
 
-        self.progress: Optional[Progress] = None
-        self.page_task: Optional[TaskID] = None
-        self.asset_task: Optional[TaskID] = None
+        self.progress: Progress | None = None
+        self.page_task: TaskID | None = None
+        self.asset_task: TaskID | None = None
         self.use_browser_mode = False
-        self.activity_log: List[dict] = []
+        self.activity_log: list[dict[str, Any]] = []
         self.start_time = asyncio.get_event_loop().time()
+        self._shutdown_event = asyncio.Event()
+        self._page_workers: list[asyncio.Task[None]] = []
+        self._asset_workers: list[asyncio.Task[None]] = []
 
     def create_layout(self) -> Layout:
         layout = Layout()
@@ -339,21 +342,53 @@ class UIFMigrationEngine:
                 await self.state.update_status(url, MigrationStatus.FAILED, str(e))
 
     async def page_worker(self, session: AsyncStealthySession) -> None:
-        while True:
-            url = await self.url_queue.get()
+        while not self._shutdown_event.is_set():
+            try:
+                url = await asyncio.wait_for(self.url_queue.get(), timeout=1.0)
+            except asyncio.TimeoutError:
+                continue
+
             try:
                 async with self.semaphore:
                     await self.process_page(session, url)
+            except asyncio.CancelledError:
+                # Shutdown mid-processing: mark URL as pending to avoid losing it
+                logger.warning(
+                    "Worker cancelled processing %s, marking as pending", url
+                )
+                await self.state.update_status(url, MigrationStatus.PENDING)
+                raise
+            except Exception as e:
+                logger.error("Error processing %s: %s", url, e)
             finally:
+                # Always mark task as done - queue tracking is separate from DB state
                 self.url_queue.task_done()
 
     async def asset_worker(self) -> None:
-        while True:
-            url = await self.asset_queue.get()
+        while not self._shutdown_event.is_set():
+            try:
+                url = await asyncio.wait_for(self.asset_queue.get(), timeout=1.0)
+            except asyncio.TimeoutError:
+                continue
+
             try:
                 await self.download_asset(url)
+            except asyncio.CancelledError:
+                logger.warning(
+                    "Asset worker cancelled downloading %s, marking as pending", url
+                )
+                await self.state.update_status(url, MigrationStatus.PENDING)
+                raise
+            except Exception as e:
+                logger.error("Error downloading %s: %s", url, e)
             finally:
+                # Always mark task as done
                 self.asset_queue.task_done()
+
+    def request_shutdown(self) -> None:
+        """Signal graceful shutdown. Workers will stop accepting new tasks."""
+        self._shutdown_event.set()
+        logger.info("Shutdown requested. Workers will finish current tasks...")
 
     async def run(self) -> None:
         await self.setup()
@@ -399,34 +434,56 @@ class UIFMigrationEngine:
                 solve_cloudflare=True,
                 additional_args=additional_args,
             ) as session:
-                page_workers = [
+                self._page_workers = [
                     asyncio.create_task(self.page_worker(session))
                     for _ in range(self.config.default_workers)
                 ]
-                asset_workers = []
+                self._asset_workers = []
                 if self.extract_assets:
-                    asset_workers = [
+                    self._asset_workers = [
                         asyncio.create_task(self.asset_worker())
                         for _ in range(self.config.asset_workers)
                     ]
 
-                while not (
-                    self.url_queue.empty()
-                    and self.asset_queue.empty()
-                    and all(w.done() for w in page_workers + asset_workers)
-                ):
-                    self.update_layout(dashboard)
-                    await asyncio.sleep(0.25)
-                    if self.url_queue.empty() and self.asset_queue.empty():
-                        # Verificar si hay workers procesando realmente
-                        await asyncio.sleep(1)
-                        if self.url_queue.empty() and self.asset_queue.empty():
+                all_workers = self._page_workers + self._asset_workers
+
+                try:
+                    while not self._shutdown_event.is_set():
+                        self.update_layout(dashboard)
+
+                        # Check if all work is done
+                        if (
+                            self.url_queue.empty()
+                            and self.asset_queue.empty()
+                            and all(w.done() for w in all_workers)
+                        ):
                             break
 
-                await self.url_queue.join()
-                if self.extract_assets:
-                    await self.asset_queue.join()
-                for w in page_workers + asset_workers:
-                    w.cancel()
+                        await asyncio.sleep(0.25)
+
+                    # Graceful shutdown: wait for queues to drain
+                    if not self._shutdown_event.is_set():
+                        logger.info("Work completed. Draining queues...")
+
+                    await self.url_queue.join()
+                    if self.extract_assets:
+                        await self.asset_queue.join()
+
+                finally:
+                    # Signal workers to stop
+                    self._shutdown_event.set()
+
+                    # Wait for workers to finish (with timeout)
+                    if all_workers:
+                        await asyncio.wait(all_workers, timeout=30.0)
+
+                    # Cancel any remaining workers
+                    for w in all_workers:
+                        if not w.done():
+                            w.cancel()
+
+                    # Wait for cancellations to complete
+                    if all_workers:
+                        await asyncio.wait(all_workers, timeout=5.0)
 
         await self.reporter.generate_summary()
