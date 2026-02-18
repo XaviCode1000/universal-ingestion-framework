@@ -5,6 +5,28 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.0.1] - 2026-02-18
+
+### Added
+- Graceful shutdown with `asyncio.Event` for clean process termination.
+- SIGTERM/SIGINT signal handlers with cross-platform fallback (Unix/Windows).
+- `__slots__` to `CircuitBreaker` for memory optimization.
+- Comprehensive test suite with 75 tests passing.
+
+### Changed
+- Migrated type hints to Python 3.12+ syntax (`list[]`, `dict[]`, `X | None`).
+- `WebPage` model is now immutable (`frozen=True`).
+- Improved exception logging in `TextExtractor` with conditional traceback.
+- Test URLs updated to use webscraper.io test sites.
+
+### Fixed
+- Fixed `task_done()` always called regardless of shutdown state.
+- Fixed `shutdown_monitor` task cleanup on normal exit.
+- Fixed URL loss on `CancelledError` during processing (re-queues URL as pending).
+
+### Removed
+- Removed unused `polars` dependency from pyproject.toml.
+
 ## [3.0.0] - 2026-01-19
 
 ### Added
