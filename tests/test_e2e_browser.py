@@ -15,13 +15,14 @@ Ejecutar:
 Saltar si no hay navegador:
     pytest tests/test_e2e_browser.py -v -k "not browser"
 """
+
 import asyncio
-import pytest
-from pathlib import Path
 from unittest.mock import MagicMock
 
+import pytest
+
 from uif_scraper.config import ScraperConfig
-from uif_scraper.db_manager import StateManager, MigrationStatus
+from uif_scraper.db_manager import StateManager
 from uif_scraper.db_pool import SQLitePool
 from uif_scraper.engine import UIFMigrationEngine
 from uif_scraper.navigation import NavigationService
@@ -38,7 +39,7 @@ TEST_URL_PRODUCT = "https://webscraper.io/test-sites/e-commerce/static/product/1
 async def test_browser_scrape_single_page(tmp_path):
     """
     E2E Browser: Scrapear una página con navegador real.
-    
+
     Verifica:
     - Navegador Chromium funciona
     - Stealth session evade detección
@@ -51,19 +52,19 @@ async def test_browser_scrape_single_page(tmp_path):
         max_retries=2,
         timeout_seconds=30,
     )
-    
+
     db_path = tmp_path / "browser.db"
     pool = SQLitePool(db_path)
     state = StateManager(pool)
     await state.initialize()
-    
+
     nav = NavigationService(TEST_URL_PRODUCT, scope=ScrapingScope.STRICT)
     rep = ReporterService(MagicMock(), state)
-    
+
     from uif_scraper.extractors.text_extractor import TextExtractor
     from uif_scraper.extractors.metadata_extractor import MetadataExtractor
     from uif_scraper.extractors.asset_extractor import AssetExtractor
-    
+
     engine = UIFMigrationEngine(
         config=config,
         state=state,
@@ -74,16 +75,16 @@ async def test_browser_scrape_single_page(tmp_path):
         reporter_service=rep,
         extract_assets=False,
     )
-    
+
     await engine.setup()
-    
+
     # Verificar que la URL está en la cola
     assert not engine.url_queue.empty()
     assert TEST_URL_PRODUCT in engine.seen_urls
-    
+
     # Crear sesión stealth con navegador real
     from scrapling.fetchers import AsyncStealthySession
-    
+
     async with AsyncStealthySession(
         headless=True,
         max_pages=1,
@@ -94,7 +95,7 @@ async def test_browser_scrape_single_page(tmp_path):
         url = await engine.url_queue.get()
         await engine.process_page(session, url)
         engine.url_queue.task_done()
-    
+
     # Verificar que se completó
     async with pool.acquire() as db:
         async with db.execute(
@@ -103,23 +104,23 @@ async def test_browser_scrape_single_page(tmp_path):
             row = await cursor.fetchone()
             assert row is not None, "URL no encontrada en DB"
             assert row[0] == "completed", f"Estado esperado 'completed', fue '{row[0]}'"
-    
+
     # Verificar que se creó el archivo Markdown
     content_dir = tmp_path / "content"
     assert content_dir.exists(), "Directorio de contenido no creado"
-    
+
     md_files = list(content_dir.glob("*.md"))
     assert len(md_files) >= 1, "No se creó archivo Markdown"
-    
+
     # Verificar contenido del Markdown
     md_content = md_files[0].read_text()
     assert "---" in md_content, "Sin frontmatter YAML"
     assert "title:" in md_content, "Sin título en frontmatter"
     assert len(md_content) > 100, "Contenido muy corto"
-    
+
     # Verificar que el título es relevante (no genérico)
     assert "Sin Título" not in md_content or "Documento" not in md_content
-    
+
     await pool.close_all()
 
 
@@ -128,27 +129,27 @@ async def test_browser_scrape_single_page(tmp_path):
 async def test_browser_navigation_extracts_links(tmp_path):
     """
     E2E Browser: Verificar navegación extrae links.
-    
+
     Nota: Usa AsyncFetcher para evitar timeout del pool de páginas.
     El test test_browser_scrape_single_page ya verifica que el browser funciona.
     """
     from scrapling.fetchers import AsyncFetcher
-    
+
     # Fetch con HTTP directo (más rápido y estable)
     response = await AsyncFetcher.get(
         TEST_URL,
         impersonate="chrome",
         timeout=30,
     )
-    
+
     assert response.status == 200, f"HTTP {response.status}"
-    
+
     html = response.body if isinstance(response.body, str) else response.body.decode()
     assert len(html) > 1000, "HTML muy corto"
-    
+
     nav = NavigationService(TEST_URL, scope=ScrapingScope.BROAD)
     pages, assets = nav.extract_links(response, TEST_URL)
-    
+
     assert len(pages) >= 0
     for page_url in pages:
         assert "#" not in page_url
@@ -159,7 +160,7 @@ async def test_browser_navigation_extracts_links(tmp_path):
 async def test_browser_full_mission_mini(tmp_path):
     """
     E2E Browser: Mini misión completa con navegador real.
-    
+
     Ejecuta engine.run() con timeout para verificar que:
     - Browser se inicia correctamente
     - Workers procesan URLs
@@ -171,20 +172,20 @@ async def test_browser_full_mission_mini(tmp_path):
         max_retries=2,
         timeout_seconds=15,
     )
-    
+
     db_path = tmp_path / "browser_full.db"
     pool = SQLitePool(db_path)
     state = StateManager(pool)
     await state.initialize()
-    
+
     # URL única para test rápido
     nav = NavigationService(TEST_URL_PRODUCT, scope=ScrapingScope.STRICT)
     rep = ReporterService(MagicMock(), state)
-    
+
     from uif_scraper.extractors.text_extractor import TextExtractor
     from uif_scraper.extractors.metadata_extractor import MetadataExtractor
     from uif_scraper.extractors.asset_extractor import AssetExtractor
-    
+
     engine = UIFMigrationEngine(
         config=config,
         state=state,
@@ -195,27 +196,28 @@ async def test_browser_full_mission_mini(tmp_path):
         reporter_service=rep,
         extract_assets=False,
     )
-    
+
     # Ejecutar con timeout de 90 segundos
     async def run_with_timeout():
         await asyncio.wait_for(engine.run(), timeout=90.0)
-    
+
     try:
         await run_with_timeout()
     except asyncio.TimeoutError:
         # Si timeout, requestar shutdown
         engine.request_shutdown()
         await asyncio.sleep(2)
-    
+
     # Verificar que al menos 1 página se procesó
     assert engine.pages_completed >= 0, "Debería haber páginas completadas"
-    
+
     # Verificar DB
     async with pool.acquire() as db:
         async with db.execute("SELECT COUNT(*) FROM urls") as cursor:
-            count = await cursor.fetchone()
-            assert count[0] >= 1, "Al menos 1 URL en DB"
-    
+            row = await cursor.fetchone()
+            assert row is not None, "No se pudo obtener el conteo"
+            assert row[0] >= 1, "Al menos 1 URL en DB"
+
     # Verificar que se creó contenido
     content_dir = tmp_path / "content"
     if content_dir.exists():
@@ -223,5 +225,5 @@ async def test_browser_full_mission_mini(tmp_path):
         if md_files:
             md_content = md_files[0].read_text()
             assert len(md_content) > 50, "Contenido muy corto"
-    
+
     await pool.close_all()
