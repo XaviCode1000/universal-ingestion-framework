@@ -99,7 +99,7 @@ class StateManager:
                         """UPDATE urls 
                            SET status = ?, last_error = ?, last_try = CURRENT_TIMESTAMP 
                            WHERE url = ?""",
-                        [(status, url, error) for status, url, error in batch],
+                        [(status, error, url) for status, url, error in batch],
                     )
                     await db.commit()
 

@@ -189,6 +189,7 @@ class UIFMigrationEngine:
 
     async def setup(self) -> None:
         await self.state.initialize()
+        await self.state.start_batch_processor()
         async with self.state.pool.acquire() as db:
             async with db.execute("SELECT url, type, status FROM urls") as cursor:
                 async for row in cursor:
