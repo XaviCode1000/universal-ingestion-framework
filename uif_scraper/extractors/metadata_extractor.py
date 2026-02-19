@@ -31,9 +31,9 @@ class ExtendedMetadata(BaseModel):
     # Metadata básica (existente)
     url: str
     title: str = "Documento"
-    author: str = "Desconocido"
-    date: str = "N/A"
-    sitename: str
+    author: str | None = "Desconocido"
+    date: str | None = "N/A"
+    sitename: str | None = None
     ingestion_engine: str = "UIF v3.0"
 
     # Metadata expandida (nueva)
@@ -152,28 +152,29 @@ class MetadataExtractor(IExtractor):
         except Exception:
             traf_metadata = None
 
-        # Author: meta tag > trafilatura
+        # Author: meta tag > trafilatura > "Desconocido"
         author = get_meta("name", "author")
         if not author:
-            author = (
-                getattr(traf_metadata, "author", "Desconocido")
-                if traf_metadata
-                else "Desconocido"
+            raw_author = (
+                getattr(traf_metadata, "author", None) if traf_metadata else None
             )
+            author = raw_author or "Desconocido"
 
-        # Date: JSON-LD > trafilatura
+        # Date: JSON-LD > trafilatura > "N/A"
         date = "N/A"
         if json_ld and isinstance(json_ld, dict):
             date = json_ld.get("datePublished") or json_ld.get("dateCreated") or "N/A"
         if date == "N/A" and traf_metadata:
-            date = getattr(traf_metadata, "date", "N/A") or "N/A"
+            raw_date = getattr(traf_metadata, "date", None)
+            date = raw_date or "N/A"
 
         # Sitename: OG > trafilatura > domain
         sitename = get_meta("property", "og:site_name")
         if not sitename:
-            sitename = (
-                getattr(traf_metadata, "sitename", domain) if traf_metadata else domain
+            raw_sitename = (
+                getattr(traf_metadata, "sitename", None) if traf_metadata else None
             )
+            sitename = raw_sitename or domain
 
         # === HEADERS H1-H6 (para TOC - Fase B) ===
         headers: list[DocumentHeader] = []
