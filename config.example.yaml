@@ -1,0 +1,30 @@
+# UIF Scraper - Archivo de configuración de ejemplo
+# Copiar a ~/.config/uif-scraper/config.yaml o usar con --config
+
+# Directorio donde se guardan los datos extraídos
+data_dir: ~/scraping-data
+
+# Directorio de caché para assets descargados
+cache_dir: ~/.cache/uif-scraper
+
+# Configuración de workers
+default_workers: 5      # Workers para páginas web
+asset_workers: 8        # Workers para descarga de assets
+
+# Configuración de reintentos y timeouts
+max_retries: 3
+timeout_seconds: 30
+
+# Configuración de logging
+log_level: INFO         # DEBUG, INFO, WARNING, ERROR
+log_rotation_mb: 50     # Rotar logs cuando superen este tamaño
+
+# Configuración de base de datos SQLite
+db_pool_size: 5         # Conexiones en el pool
+db_timeout_seconds: 5.0 # Timeout para adquirir conexión
+stats_cache_ttl_seconds: 5.0  # TTL para caché de estadísticas
+
+# DNS overrides (opcional, para desarrollo/testing)
+# dns_overrides:
+#   example.com: "127.0.0.1"
+#   api.example.com: "192.168.1.100"
