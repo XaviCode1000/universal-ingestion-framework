@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import aiofiles
+import aiohttp
 import yaml
 from loguru import logger
 from scrapling.fetchers import AsyncFetcher, AsyncStealthySession
@@ -519,11 +520,22 @@ class EngineCore:
             await self._handle_page_error(url, e)
 
     async def _download_asset(self, asset_url: str) -> None:
-        """Download and save an asset."""
+        """Download and save an asset with proper headers for hotlink protection.
+
+        Uses Referer/Origin headers to bypass hotlink protection that blocks
+        direct asset downloads without a valid referrer.
+        """
         async with self.semaphore:
             try:
                 session = await self.http_cache.get_session()
-                async with session.get(asset_url) as response:
+                async with session.get(
+                    asset_url,
+                    headers={
+                        "Referer": self.navigation.base_url,
+                        "Origin": self.navigation.base_url,
+                    },
+                    timeout=aiohttp.ClientTimeout(total=60),
+                ) as response:
                     if response.status == 200:
                         content = await response.read()
                         await self.asset_extractor.extract(content, asset_url)

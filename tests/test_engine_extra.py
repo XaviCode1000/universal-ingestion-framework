@@ -64,16 +64,33 @@ async def test_engine_download_asset(tmp_path):
         reporter_service=rep,
     )
 
-    mock_resp = MagicMock()
-    mock_resp.status = 200
-    mock_resp.body = b"fake data"
+    # Mock aiohttp session and response
+    mock_response = AsyncMock()
+    mock_response.status = 200
+    mock_response.read = AsyncMock(return_value=b"fake asset data")
 
-    with patch(
-        "scrapling.fetchers.AsyncFetcher.get", new_callable=AsyncMock
-    ) as mock_get:
-        mock_get.return_value = mock_resp
+    mock_session = AsyncMock()
+    mock_session.get = MagicMock(return_value=AsyncMock())
+    mock_session.get.return_value.__aenter__ = AsyncMock(return_value=mock_response)
+    mock_session.get.return_value.__aexit__ = AsyncMock(return_value=None)
+
+    with patch.object(
+        core.http_cache, "get_session", new_callable=AsyncMock
+    ) as mock_get_session:
+        mock_get_session.return_value = mock_session
         await core._download_asset(f"{TEST_URL}/img.png")
-        asset_extractor.extract.assert_called_once()
+
+        # Verify session.get was called with correct headers for hotlink protection
+        mock_session.get.assert_called_once()
+        call_args = mock_session.get.call_args
+        assert call_args[0][0] == f"{TEST_URL}/img.png"
+        assert "headers" in call_args.kwargs
+        assert call_args.kwargs["headers"]["Referer"] == TEST_URL
+        assert call_args.kwargs["headers"]["Origin"] == TEST_URL
+
+        asset_extractor.extract.assert_called_once_with(
+            b"fake asset data", f"{TEST_URL}/img.png"
+        )
         assert core.assets_completed == 1
 
     await pool.close_all()
