@@ -36,8 +36,8 @@ class TextualUICallback(UICallback):
         """
         from uif_scraper.tui.app import EngineProgress
 
-        self._app.call_from_thread(
-            self._app.post_message,
+        # Post message directly - we're in the same async event loop
+        self._app.post_message(
             EngineProgress(
                 pages_completed=stats.pages_completed,
                 pages_total=stats.pages_total,
@@ -56,10 +56,8 @@ class TextualUICallback(UICallback):
         """
         from uif_scraper.tui.app import EngineActivity
 
-        self._app.call_from_thread(
-            self._app.post_message,
-            EngineActivity(title=entry.title, engine=entry.engine),
-        )
+        # Post message directly - we're in the same async event loop
+        self._app.post_message(EngineActivity(title=entry.title, engine=entry.engine))
 
     def on_mode_change(self, browser_mode: bool) -> None:
         """Notificar cambio de modo (stealth ↔ browser).
@@ -69,9 +67,8 @@ class TextualUICallback(UICallback):
         """
         from uif_scraper.tui.app import EngineStatus
 
-        # Obtener estado actual para actualizar solo el modo
-        self._app.call_from_thread(
-            self._app.post_message,
+        # Post message directly - we're in the same async event loop
+        self._app.post_message(
             EngineStatus(
                 circuit_state="unknown",  # No disponible en este contexto
                 queue_pending=0,  # No disponible en este contexto
@@ -88,8 +85,8 @@ class TextualUICallback(UICallback):
         """
         from uif_scraper.tui.app import EngineStatus
 
-        self._app.call_from_thread(
-            self._app.post_message,
+        # Post message directly - we're in the same async event loop
+        self._app.post_message(
             EngineStatus(
                 circuit_state=state,
                 queue_pending=0,  # No disponible en este contexto
