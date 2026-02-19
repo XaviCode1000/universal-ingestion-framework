@@ -12,20 +12,20 @@ logger = logging.getLogger(__name__)
 
 class HTTPSessionCache:
     """Caché de sesiones HTTP reutilizables con connection pooling.
-    
+
     Proporciona:
     - Connection pooling con límites configurables
     - DNS caching para reducir resolución
     - Keep-alive para reutilizar conexiones
     - Timeouts configurables por operación
     - Cleanup automático de conexiones cerradas
-    
+
     Uso:
         cache = HTTPSessionCache()
         session = await cache.get_session()
         async with session.get(url) as response:
             content = await response.read()
-        
+
         # Al finalizar:
         await cache.close()
     """
@@ -39,7 +39,7 @@ class HTTPSessionCache:
         timeout_read: float = 20.0,
     ):
         """Inicializa caché de sesiones HTTP.
-        
+
         Args:
             max_pool_size: Límite total de conexiones simultáneas
             max_connections_per_host: Límite de conexiones por dominio
@@ -70,7 +70,7 @@ class HTTPSessionCache:
 
     async def get_session(self) -> aiohttp.ClientSession:
         """Obtiene o crea una sesión HTTP reutilizable.
-        
+
         Returns:
             aiohttp.ClientSession configurada con pooling
         """
@@ -103,7 +103,7 @@ class HTTPSessionCache:
                 self._max_pool_size,
                 self._max_per_host,
             )
-        
+
         return self._session
 
     async def close(self) -> None:
@@ -111,11 +111,11 @@ class HTTPSessionCache:
         if self._session and not self._session.closed:
             await self._session.close()
             logger.debug("HTTP session closed")
-        
+
         if self._connector and not self._connector.closed:
             await self._connector.close()
             logger.debug("HTTP connector closed")
-        
+
         self._session = None
         self._connector = None
 

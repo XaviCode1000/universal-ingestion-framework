@@ -52,10 +52,9 @@ class NavigationService:
         # 3. Strict Scope: Solo subrutas exactas de la semilla
         # Usa removeprefix para verificar pertenencia de forma segura
         if self.scope == ScrapingScope.STRICT:
-            return (
-                full_url == self.base_url
-                or full_url.removeprefix(self.base_url).startswith("/")
-            )
+            return full_url == self.base_url or full_url.removeprefix(
+                self.base_url
+            ).startswith("/")
 
         # 4. Smart Scope: Lógica de subdirectorio inteligente
         # Si la semilla es raíz (ej: domain.com/), se comporta como Broad.
@@ -65,20 +64,19 @@ class NavigationService:
         if not path_parts:
             return True  # Es raíz del dominio
 
-        return (
-            full_url == self.base_url
-            or full_url.removeprefix(self.base_url).startswith("/")
-        )
+        return full_url == self.base_url or full_url.removeprefix(
+            self.base_url
+        ).startswith("/")
 
     def extract_links(
         self, html_parser: HTMLParserLike, current_url: str
     ) -> tuple[list[str], list[str]]:
         """Extrae links y assets de una página HTML.
-        
+
         Args:
             html_parser: Parser HTML con método css() (selectolax, scrapling, etc.)
             current_url: URL actual para resolver links relativos.
-        
+
         Returns:
             Tupla (nuevas_paginas, nuevos_assets) sin duplicados.
         """

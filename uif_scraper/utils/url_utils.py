@@ -13,7 +13,7 @@ from slugify import slugify as python_slugify
 
 def slugify(value: str) -> str:
     """Sanitiza string para nombre de archivo seguro.
-    
+
     Usa python-slugify para manejo robusto de Unicode y edge cases.
     Ejemplos:
         "Español" → "espanol"

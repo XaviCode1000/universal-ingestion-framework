@@ -21,26 +21,26 @@ def mmap_read_chunks(
     chunk_size: int = 10 * 1024 * 1024,  # 10MB por defecto
 ) -> Iterator[bytes]:
     """Lee archivo grande usando memory-mapping en chunks.
-    
+
     Args:
         file_path: Path del archivo a leer
         chunk_size: Tamaño de cada chunk en bytes (10MB por defecto)
-    
+
     Yields:
         Chunks de datos como bytes
-    
+
     Ejemplo:
         >>> for chunk in mmap_read_chunks(Path("large_file.bin")):
         ...     process(chunk)
     """
     file_size = file_path.stat().st_size
-    
+
     # Para archivos pequeños (< chunk_size), usar lectura tradicional
     if file_size < chunk_size:
         with open(file_path, "rb") as f:
             yield f.read()
         return
-    
+
     with open(file_path, "rb") as f:
         # Memory-map el archivo completo (lazy loading)
         with mmap.mmap(f.fileno(), length=0, access=mmap.ACCESS_READ) as mm:
@@ -56,12 +56,12 @@ def mmap_process_file(
     chunk_size: int = 10 * 1024 * 1024,
 ) -> None:
     """Procesa archivo grande usando mmap con función custom.
-    
+
     Args:
         file_path: Path del archivo a procesar
         processor: Función que recibe bytes y procesa el chunk
         chunk_size: Tamaño de chunk para procesamiento
-    
+
     Ejemplo:
         >>> def count_lines(chunk: bytes) -> None:
         ...     global total
@@ -74,13 +74,13 @@ def mmap_process_file(
 
 def mmap_read_lines(file_path: Path) -> Iterator[str]:
     """Lee archivo línea por línea usando mmap (eficiente para logs).
-    
+
     Args:
         file_path: Path del archivo a leer
-    
+
     Yields:
         Líneas del archivo como strings decodificados (UTF-8)
-    
+
     Ejemplo:
         >>> for line in mmap_read_lines(Path("large.log")):
         ...     if "ERROR" in line:
@@ -98,24 +98,24 @@ def mmap_read_lines(file_path: Path) -> Iterator[str]:
 
 def mmap_file_info(file_path: Path) -> dict[str, Any]:
     """Obtiene información de archivo para decidir si usar mmap.
-    
+
     Args:
         file_path: Path del archivo
-    
+
     Returns:
         Diccionario con información del archivo y recomendación
-    
+
     Ejemplo:
         >>> info = mmap_file_info(Path("data.bin"))
         >>> if info["recommend_mmap"]:
         ...     print(f"Usar mmap: {info['reason']}")
     """
     file_size = file_path.stat().st_size
-    
+
     # Umbrales basados en benchmarks
     MMAP_THRESHOLD = 50 * 1024 * 1024  # 50MB
     SMALL_THRESHOLD = 10 * 1024 * 1024  # 10MB
-    
+
     if file_size < SMALL_THRESHOLD:
         return {
             "size_bytes": file_size,
@@ -147,14 +147,14 @@ async def async_mmap_read_chunks(
     chunk_size: int = 10 * 1024 * 1024,
 ) -> "AsyncGenerator[bytes, None]":
     """Versión async de mmap_read_chunks para integración con asyncio.
-    
+
     Nota: mmap es inherentemente síncrono, pero esta función permite
     iteración lazy en contextos async.
-    
+
     Args:
         file_path: Path del archivo a leer
         chunk_size: Tamaño de cada chunk en bytes
-    
+
     Yields:
         Chunks de datos como bytes
     """

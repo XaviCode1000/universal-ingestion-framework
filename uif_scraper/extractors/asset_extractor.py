@@ -25,7 +25,7 @@ class AssetExtractor(IExtractor):
 
     async def extract(self, content: bytes, url: str) -> dict[str, Any]:
         """Extrae y guarda un asset con manejo optimizado de memoria.
-        
+
         Estrategias según tamaño:
         - <10MB: Escritura directa
         - 10-50MB: Stream writing en chunks
@@ -57,7 +57,7 @@ class AssetExtractor(IExtractor):
             # Escribir primero, luego procesar con mmap si es necesario
             async with aiofiles.open(local_path, "wb") as f:
                 await f.write(content)
-            
+
             # Log para debugging
             mmap_info = mmap_file_info(local_path)
             result_info = f" (mmap: {mmap_info['reason']})"

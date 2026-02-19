@@ -13,7 +13,7 @@ from uif_scraper.extractors.base import IExtractor
 
 class MetadataExtractor(IExtractor):
     """Extractor de metadata con caché LRU para contenido repetido.
-    
+
     Usa functools.lru_cache que es:
     - Thread-safe por defecto
     - Más rápido que implementación custom
@@ -23,7 +23,7 @@ class MetadataExtractor(IExtractor):
 
     def __init__(self, cache_size: int = 1000):
         """Inicializa extractor con caché LRU.
-        
+
         Args:
             cache_size: Máximo de entradas en caché (1000 por defecto).
                        Cada entrada ~1KB, total ~1MB de memoria.
@@ -34,14 +34,16 @@ class MetadataExtractor(IExtractor):
             self._extract_metadata_pure
         )
 
-    def _extract_metadata_pure(self, content_hash: str, content: str, url: str) -> dict[str, Any]:
+    def _extract_metadata_pure(
+        self, content_hash: str, content: str, url: str
+    ) -> dict[str, Any]:
         """Extracción pura de metadata (sin efectos secundarios).
-        
+
         Args:
             content_hash: Hash del contenido para caché
             content: HTML crudo
             url: URL de origen
-        
+
         Returns:
             Diccionario con metadata extraída
         """
@@ -85,15 +87,15 @@ class MetadataExtractor(IExtractor):
 
     async def extract(self, content: Any, url: str) -> dict[str, Any]:
         """Extrae metadata con caché LRU automático.
-        
+
         El caché usa hash del contenido para detectar duplicados,
         permitiendo reutilizar resultados para URLs diferentes con
         el mismo HTML.
-        
+
         Args:
             content: HTML crudo
             url: URL de origen
-        
+
         Returns:
             Diccionario con metadata extraída
         """
@@ -102,15 +104,15 @@ class MetadataExtractor(IExtractor):
 
         # Hash del contenido para caché (primeros 10KB son suficientes)
         content_hash = hashlib.md5(content[:10000].encode()).hexdigest()
-        
+
         # Extraer con caché
         result = self._extract_metadata_cached(content_hash, content, url)
-        
+
         return result
 
     def get_cache_info(self) -> dict[str, Any]:
         """Obtiene estadísticas de caché para monitoring.
-        
+
         Returns:
             Diccionario con hits, misses, tamaño actual y máximo.
         """

@@ -10,7 +10,7 @@ from uif_scraper.models import MigrationStatus
 
 class StateManager:
     """Gestión de estado de URLs con SQLite y pool de conexiones.
-    
+
     Incluye:
     - Caché de estadísticas con TTL para reducir presión en DB
     - Buffer de actualizaciones para batch processing
@@ -28,7 +28,7 @@ class StateManager:
         self._stats_cache: dict[str, int] | None = None
         self._stats_cached_at: float = 0
         self._stats_cache_ttl = stats_cache_ttl
-        
+
         # Batch update buffers para reducir commits individuales
         self._status_buffer: list[tuple[str, str, str | None]] = []
         self._buffer_lock = asyncio.Lock()
@@ -57,9 +57,7 @@ class StateManager:
             await db.execute(
                 "CREATE INDEX IF NOT EXISTS idx_status_type ON urls(status, type)"
             )
-            await db.execute(
-                "CREATE INDEX IF NOT EXISTS idx_retries ON urls(retries)"
-            )
+            await db.execute("CREATE INDEX IF NOT EXISTS idx_retries ON urls(retries)")
             # Índices para queries temporales
             await db.execute(
                 "CREATE INDEX IF NOT EXISTS idx_discovered_at ON urls(discovered_at)"
@@ -75,12 +73,12 @@ class StateManager:
 
     async def _start_batch_processor(self) -> None:
         """Inicia procesador batch en background para flush periódico."""
-        
+
         async def process_batches() -> None:
             while True:
                 await asyncio.sleep(self._batch_interval)
                 await self._flush_status_buffer()
-        
+
         self._batch_task = asyncio.create_task(process_batches())
 
     async def _flush_status_buffer(self) -> None:
@@ -89,10 +87,10 @@ class StateManager:
             async with self._buffer_lock:
                 if not self._status_buffer:
                     return
-                
+
                 batch = self._status_buffer.copy()
                 self._status_buffer.clear()
-            
+
             if batch:
                 async with self.pool.acquire() as db:
                     await db.executemany(
@@ -105,7 +103,7 @@ class StateManager:
 
     async def start_batch_processor(self) -> None:
         """Inicia el procesador batch explícitamente.
-        
+
         Nota: El batch processor NO se inicia automáticamente en __init__.
         Debe llamarse a este método explícitamente cuando se desea usar
         buffering batch.
@@ -122,7 +120,7 @@ class StateManager:
             except asyncio.CancelledError:
                 pass
             self._batch_task = None
-        
+
         # Flush final
         await self._flush_status_buffer()
 
@@ -130,12 +128,12 @@ class StateManager:
         self, url: str, status: MigrationStatus, m_type: str = "webpage"
     ) -> None:
         """Agrega una URL individual a la base de datos con validación temprana.
-        
+
         Args:
             url: URL a agregar
             status: Estado inicial
             m_type: Tipo de recurso ("webpage" o "asset")
-        
+
         Raises:
             ValueError: Si la URL tiene formato inválido o es demasiado larga.
         """
@@ -145,7 +143,7 @@ class StateManager:
             raise ValueError(f"Invalid URL format: {url}")
         if len(url) > 2048:  # Límite práctico de URL
             raise ValueError(f"URL too long: {len(url)} chars")
-        
+
         async with self.pool.acquire() as db:
             await db.execute(
                 "INSERT OR IGNORE INTO urls (url, status, type) VALUES (?, ?, ?)",
@@ -157,18 +155,18 @@ class StateManager:
         self, urls: list[tuple[str, MigrationStatus, str]], batch_size: int = 500
     ) -> None:
         """Inserción batch eficiente para múltiples URLs con tamaño óptimo.
-        
+
         Args:
             urls: Lista de tuplas (url, status, type)
             batch_size: Tamaño máximo de cada batch para evitar locks largos.
-        
+
         Nota:
             Los batches más grandes pueden causar locks prolongados en SQLite.
             El valor por defecto (500) balancea performance y concurrencia.
         """
         if not urls:
             return
-        
+
         # Validación temprana de todas las URLs antes de insertar
         for url, _, _ in urls:
             parsed = urlparse(url)
@@ -176,7 +174,7 @@ class StateManager:
                 raise ValueError(f"Invalid URL format: {url}")
             if len(url) > 2048:
                 raise ValueError(f"URL too long: {len(url)} chars")
-        
+
         # Procesar en batches más pequeños para evitar locks largos
         for i in range(0, len(urls), batch_size):
             batch = urls[i : i + batch_size]
@@ -195,13 +193,13 @@ class StateManager:
         immediate: bool = False,
     ) -> None:
         """Actualiza estado de URL con buffering batch opcional.
-        
+
         Args:
             url: URL a actualizar
             status: Nuevo estado
             error_msg: Mensaje de error (opcional, se trunca a 500 chars)
             immediate: Si True, actualiza inmediatamente (para errores críticos)
-        
+
         Nota:
             Por defecto (immediate=False), las actualizaciones se bufferizan
             y se flushean cada batch_interval segundos o cuando se alcanza
@@ -227,7 +225,7 @@ class StateManager:
                 self._status_buffer.append(
                     (status.value, url, error_msg[:500] if error_msg else None)
                 )
-            
+
             # Flush inmediato si buffer supera threshold
             if len(self._status_buffer) >= self._batch_size:
                 await self._flush_status_buffer()
@@ -272,15 +270,15 @@ class StateManager:
 
     async def get_stats(self, force_refresh: bool = False) -> dict[str, int]:
         """Obtiene estadísticas de estado con caché TTL.
-        
+
         Args:
             force_refresh: Si True, invalida el caché y consulta la DB.
-        
+
         Returns:
             Diccionario con conteo por estado: {"completed": 100, "pending": 50, ...}
         """
         now = time.time()
-        
+
         # Usar caché si es válido y no se fuerza refresh
         if (
             not force_refresh
@@ -288,7 +286,7 @@ class StateManager:
             and (now - self._stats_cached_at) < self._stats_cache_ttl
         ):
             return self._stats_cache
-        
+
         async with self.pool.acquire() as db:
             query = """
                 SELECT status, COUNT(*) as count

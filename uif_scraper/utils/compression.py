@@ -94,9 +94,7 @@ async def read_compressed_markdown(path: Path) -> str:
             return await f.read()
 
 
-def get_compression_stats(
-    original_size: int, compressed_size: int
-) -> dict[str, float]:
+def get_compression_stats(original_size: int, compressed_size: int) -> dict[str, float]:
     """Calcula estadísticas de compresión."""
     ratio = (1 - compressed_size / original_size) * 100 if original_size > 0 else 0
     return {

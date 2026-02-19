@@ -56,7 +56,7 @@ class WebPageInput(BaseModel):
 
 class WebPage(WebPageInput):
     """Modelo inmutable para resultados de extracción de páginas web.
-    
+
     Extiende WebPageInput agregando metadata de sistema.
     """
 

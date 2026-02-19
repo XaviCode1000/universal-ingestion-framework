@@ -84,12 +84,12 @@ def prune_by_density(
 
 def pre_clean_html(raw_html: str, max_size: int = 5 * 1024 * 1024) -> str:
     """Limpia HTML eliminando tags irrelevantes y contenido boilerplate.
-    
+
     Args:
         raw_html: HTML crudo a limpiar
         max_size: Tamaño máximo en bytes (5MB por defecto). HTML más grande
                   se trunca para evitar OOM.
-    
+
     Returns:
         HTML limpio, listo para extracción de texto.
     """
