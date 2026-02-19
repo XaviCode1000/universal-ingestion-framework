@@ -1,0 +1,55 @@
+{
+  "general": {
+    "preferredEditor": "code",
+    "vimMode": false,
+    "enableAutoUpdate": true,
+    "gitCoAuthor": true
+  },
+  "ui": {
+    "theme": "GitHub",
+    "hideTips": false,
+    "showMemoryUsage": false
+  },
+  "context": {
+    "fileName": [
+      "AGENTS.md",
+      ".qwen/AGENTS.md",
+      ".qwen/skills/uif-expert/SKILL.md",
+      ".qwen/skills/exa-search/SKILL.md"
+    ],
+    "fileFiltering": {
+      "respectGitIgnore": true,
+      "respectQwenIgnore": true,
+      "enableRecursiveFileSearch": true,
+      "enableFuzzySearch": true
+    }
+  },
+  "tools": {
+    "approvalMode": "default",
+    "useRipgrep": true,
+    "enableToolOutputTruncation": true,
+    "truncateToolOutputThreshold": 25000
+  },
+  "mcpServers": {
+    "exa": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "mcp-remote",
+        "https://mcp.exa.ai/mcp"
+      ],
+      "env": {
+        "EXA_API_KEY": "5ee3e130-c2ea-4460-b0ad-1a3302197dab"
+      }
+    }
+  },
+  "security": {
+    "auth": {
+      "selectedType": "qwen-oauth"
+    }
+  },
+  "telemetry": {
+    "enabled": false
+  },
+  "$version": 3
+}

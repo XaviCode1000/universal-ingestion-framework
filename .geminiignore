@@ -1,0 +1,49 @@
+# .geminiignore - Archivos ignorados por Gemini CLI
+
+# Datos del proyecto
+data/
+*.parquet
+*.jsonl
+*.html
+
+# Cache y temporales
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Entorno virtual
+.venv/
+venv/
+env/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Logs
+*.log
+logs/
+
+# Secrets
+.env
+.env.local
+*.pem
+*.key
+
+# Build
+dist/
+build/
+*.egg-info/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Otros agentes
+.qwen/
+.claude/

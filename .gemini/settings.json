@@ -1,0 +1,261 @@
+{
+  "$schema": "https://raw.githubusercontent.com/google-gemini/gemini-cli/main/schemas/settings.schema.json",
+
+  "general": {
+    "preferredEditor": "code",
+    "vimMode": false,
+    "defaultApprovalMode": "default",
+    "enableAutoUpdate": true,
+    "enableAutoUpdateNotification": true,
+    "enableNotifications": false,
+    "checkpointing": {
+      "enabled": true
+    },
+    "enablePromptCompletion": true,
+    "sessionRetention": {
+      "enabled": true,
+      "maxAge": "30d",
+      "maxCount": 50
+    }
+  },
+
+  "ui": {
+    "theme": "Ayu",
+    "autoThemeSwitching": true,
+    "hideBanner": false,
+    "hideTips": false,
+    "showShortcutsHint": true,
+    "hideContextSummary": false,
+    "footer": {
+      "hideCWD": false,
+      "hideSandboxStatus": false,
+      "hideModelInfo": false,
+      "hideContextPercentage": true
+    },
+    "showMemoryUsage": true,
+    "showLineNumbers": true,
+    "showCitations": false,
+    "showModelInfoInChat": false,
+    "useAlternateBuffer": false,
+    "showSpinner": true,
+    "customWittyPhrases": [
+      "Procesando datos con Polars Lazy...",
+      "Validando esquemas Pydantic...",
+      "Ejecutando tareas asíncronas...",
+      "Sanitizando rutas con slugify()..."
+    ]
+  },
+
+  "model": {
+    "name": "gemini-2.5-pro",
+    "maxSessionTurns": -1,
+    "compressionThreshold": 0.5,
+    "disableLoopDetection": false,
+    "skipNextSpeakerCheck": true,
+    "summarizeToolOutput": {
+      "run_shell_command": {
+        "tokenBudget": 2000
+      }
+    }
+  },
+
+  "modelConfigs": {
+    "customAliases": {
+      "uif-code": {
+        "extends": "chat-base-2.5",
+        "modelConfig": {
+          "model": "gemini-2.5-pro",
+          "generateContentConfig": {
+            "temperature": 0.2,
+            "topP": 0.95,
+            "thinkingConfig": {
+              "thinkingBudget": 4096
+            }
+          }
+        }
+      },
+      "uif-fast": {
+        "extends": "base",
+        "modelConfig": {
+          "model": "gemini-2.5-flash",
+          "generateContentConfig": {
+            "temperature": 0.3,
+            "maxOutputTokens": 8192
+          }
+        }
+      }
+    }
+  },
+
+  "context": {
+    "fileName": ["AGENTS.md", "GEMINI.md"],
+    "includeDirectoryTree": true,
+    "discoveryMaxDirs": 200,
+    "includeDirectories": [],
+    "loadMemoryFromIncludeDirectories": false,
+    "fileFiltering": {
+      "respectGitIgnore": true,
+      "respectGeminiIgnore": true,
+      "enableRecursiveFileSearch": true,
+      "enableFuzzySearch": true,
+      "customIgnoreFilePaths": []
+    }
+  },
+
+  "tools": {
+    "sandbox": false,
+    "shell": {
+      "enableInteractiveShell": true,
+      "pager": "cat",
+      "showColor": false,
+      "inactivityTimeout": 300,
+      "enableShellOutputEfficiency": true
+    },
+    "core": [
+      "read_file",
+      "write_file",
+      "list_directory",
+      "search_file_content",
+      "run_shell_command"
+    ],
+    "allowed": [
+      "run_shell_command(uv run)",
+      "run_shell_command(uv add)",
+      "run_shell_command(uv sync)",
+      "run_shell_command(git status)",
+      "run_shell_command(git diff)",
+      "run_shell_command(git log)",
+      "run_shell_command(ruff check)",
+      "run_shell_command(ruff format)",
+      "run_shell_command(mypy)",
+      "run_shell_command(pytest)"
+    ],
+    "exclude": [],
+    "useRipgrep": true,
+    "truncateToolOutputThreshold": 40000,
+    "disableLLMCorrection": true
+  },
+
+  "skills": {
+    "enabled": true,
+    "disabled": []
+  },
+
+  "hooksConfig": {
+    "enabled": true,
+    "disabled": [],
+    "notifications": true
+  },
+
+  "hooks": {
+    "SessionStart": [
+      {
+        "name": "uif-init",
+        "type": "command",
+        "command": "node .gemini/hooks/session-start.js",
+        "description": "Inicializa contexto UIF al iniciar sesión"
+      }
+    ],
+    "BeforeTool": [
+      {
+        "name": "block-secrets",
+        "matcher": "write_file|replace",
+        "type": "command",
+        "command": "node .gemini/hooks/block-secrets.js",
+        "description": "Bloquea escritura de secrets/API keys",
+        "timeout": 5000
+      },
+      {
+        "name": "validate-python",
+        "matcher": "write_file.*\\.py",
+        "type": "command",
+        "command": "node .gemini/hooks/validate-python.js",
+        "description": "Valida código Python antes de escribir",
+        "timeout": 10000
+      }
+    ],
+    "AfterTool": [
+      {
+        "name": "log-operations",
+        "matcher": ".*",
+        "type": "command",
+        "command": "node .gemini/hooks/log-operations.js",
+        "description": "Log de operaciones para auditoría"
+      }
+    ],
+    "BeforeAgent": [
+      {
+        "name": "inject-uif-context",
+        "type": "command",
+        "command": "node .gemini/hooks/inject-context.js",
+        "description": "Inyecta contexto del stack UIF"
+      }
+    ],
+    "AfterModel": [
+      {
+        "name": "validate-response",
+        "type": "command",
+        "command": "node .gemini/hooks/validate-response.js",
+        "description": "Valida formato de respuesta según AGENTS.md"
+      }
+    ]
+  },
+
+  "security": {
+    "disableYoloMode": false,
+    "enablePermanentToolApproval": false,
+    "blockGitExtensions": false,
+    "allowedExtensions": [],
+    "folderTrust": {
+      "enabled": true
+    },
+    "environmentVariableRedaction": {
+      "enabled": true,
+      "allowed": ["PATH", "HOME", "USER", "SHELL", "TERM", "LANG"],
+      "blocked": ["API_KEY", "SECRET", "PASSWORD", "TOKEN", "CREDENTIAL"]
+    }
+  },
+
+  "privacy": {
+    "usageStatisticsEnabled": false
+  },
+
+  "telemetry": {
+    "enabled": false
+  },
+
+  "advanced": {
+    "autoConfigureMemory": true,
+    "excludedEnvVars": ["DEBUG", "DEBUG_MODE", "NODE_ENV"]
+  },
+
+  "mcpServers": {
+    "exa": {
+      "httpUrl": "https://mcp.exa.ai/mcp",
+      "description": "Exa AI Search - Web search, code search, and company research",
+      "timeout": 30000
+    }
+  },
+
+  "mcp": {
+    "allowed": ["exa"],
+    "excluded": []
+  },
+
+  "experimental": {
+    "toolOutputMasking": {
+      "enabled": true,
+      "toolProtectionThreshold": 50000,
+      "minPrunableTokensThreshold": 30000,
+      "protectLatestTurn": true
+    },
+    "enableAgents": false,
+    "extensionManagement": true,
+    "extensionConfig": true,
+    "extensionRegistry": false,
+    "extensionReloading": false,
+    "jitContext": false,
+    "plan": false,
+    "modelSteering": false
+  }
+}
