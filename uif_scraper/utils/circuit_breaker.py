@@ -32,3 +32,18 @@ class CircuitBreaker:
         self.failures[domain] = 0
         if domain in self.blocked_until:
             del self.blocked_until[domain]
+
+    def get_state(self, domain: str) -> str:
+        """Get circuit breaker state for a domain.
+
+        Returns:
+            "closed" - normal operation
+            "open" - blocked, rejecting requests
+            "half-open" - recovering, allowing test requests
+        """
+        if domain in self.blocked_until:
+            if time.time() < self.blocked_until[domain]:
+                return "open"
+            # Expired, entering half-open
+            return "half-open"
+        return "closed"
