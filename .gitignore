@@ -4,13 +4,22 @@ __pycache__/
 *$py.class
 .venv/
 .env
+*.env.local
 
 # Datos de Scraping (Excluidos del control de versiones)
-data/content/*
-data/media/*
-data/migration_report.jsonl
-!data/**/.gitkeep
+data/
+
+# Testing
+.coverage
+htmlcov/
+.pytest_cache/
 
 # Herramientas
 .uv/
 uv.lock
+
+# Agentes - archivos sensibles y caches
+.gemini/.env
+.opencode/node_modules/
+.opencode/.ruff_cache/
+.opencode/bun.lock
