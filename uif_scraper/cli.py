@@ -1,19 +1,19 @@
-import argparse
+"""UIF Scraper CLI with Typer and Textual TUI."""
+
 import asyncio
-import contextlib
-import signal
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
 
 import questionary
+import typer
 from questionary import Choice
 from rich.console import Console
 
 from uif_scraper.config import load_config_with_overrides, run_wizard
 from uif_scraper.db_manager import StateManager
 from uif_scraper.db_pool import SQLitePool
-from uif_scraper.engine import UIFMigrationEngine
+from uif_scraper.engine_v2 import UIFMigrationEngineV2
 from uif_scraper.extractors.asset_extractor import AssetExtractor
 from uif_scraper.extractors.metadata_extractor import MetadataExtractor
 from uif_scraper.extractors.text_extractor import TextExtractor
@@ -23,39 +23,20 @@ from uif_scraper.navigation import NavigationService
 from uif_scraper.reporter import ReporterService
 from uif_scraper.utils.url_utils import slugify
 
+# Catppuccin-themed console
 console = Console()
 
-
-def _setup_signal_handlers(shutdown_event: asyncio.Event) -> None:
-    """Setup SIGTERM and SIGINT handlers for graceful shutdown.
-
-    Uses asyncio's add_signal_handler on Unix for clean integration,
-    falls back to signal.signal on Windows.
-    """
-    loop = asyncio.get_running_loop()
-
-    try:
-        # Unix/Linux/Mac: use the clean asyncio API
-        for sig in (signal.SIGTERM, signal.SIGINT):
-            loop.add_signal_handler(sig, shutdown_event.set)
-    except NotImplementedError:
-        # Windows: fallback to sync API (cannot use add_signal_handler)
-        # Note: signal_handler runs in the main thread, so we need to
-        # schedule shutdown_event.set() in the event loop
-        def signal_handler(signum: int, frame: Any) -> None:  # noqa: ARG001
-            console.print(
-                "\n[yellow]⚠️  Shutdown signal received. Finishing current tasks...[/]"
-            )
-            # Schedule in event loop since we're in signal context
-            loop.call_soon_threadsafe(shutdown_event.set)
-
-        signal.signal(signal.SIGINT, signal_handler)
-        if hasattr(signal, "SIGTERM"):
-            signal.signal(signal.SIGTERM, signal_handler)
+app = typer.Typer(
+    name="uif-scraper",
+    help="🛸 Universal Ingestion Framework - Web scraping con TUI moderna",
+    add_completion=True,
+    rich_markup_mode="rich",
+)
 
 
 async def run_mission_wizard() -> dict[str, Any] | None:
-    console.print("\n[bold yellow]🚀 ASISTENTE DE MISIÓN UIF[/]")
+    """Interactive mission wizard."""
+    console.print("\n[bold magenta]🚀 ASISTENTE DE MISIÓN UIF[/]")
 
     url = await questionary.text("URL base del sitio:").ask_async()
     if not url:
@@ -83,53 +64,99 @@ async def run_mission_wizard() -> dict[str, Any] | None:
     return {"url": url, "scope": scope, "mode": mode}
 
 
-async def main_async() -> None:
-    parser = argparse.ArgumentParser(description="UIF Scraper v3.0")
-    parser.add_argument("url", nargs="?", help="URL base del sitio a procesar")
-    parser.add_argument("--config", type=Path, help="Ruta al archivo de configuración")
-    parser.add_argument(
-        "--setup", action="store_true", help="Ejecutar wizard de configuración"
-    )
-    parser.add_argument(
-        "--scope", choices=["smart", "strict", "broad"], default="smart"
-    )
-    parser.add_argument("--workers", type=int, help="Número de workers concurrentes")
-    parser.add_argument("--only-text", action="store_true", help="No descargar assets")
-    parser.add_argument(
+@app.command()
+def scrape(
+    url: str = typer.Argument(
+        None,
+        help="URL base del sitio a procesar",
+    ),
+    config_path: Path = typer.Option(
+        None,
+        "--config",
+        "-c",
+        help="Ruta al archivo de configuración",
+        exists=False,
+    ),
+    scope: str = typer.Option(
+        "smart",
+        "--scope",
+        "-s",
+        help="Alcance del rastreo: smart, strict, broad",
+    ),
+    workers: int = typer.Option(
+        None,
+        "--workers",
+        "-w",
+        help="Número de workers concurrentes",
+    ),
+    only_text: bool = typer.Option(
+        False,
+        "--only-text",
+        "-t",
+        help="No descargar assets (solo texto)",
+    ),
+    output_dir: Path = typer.Option(
+        None,
         "--output-dir",
         "-d",
-        type=Path,
-        help="Directorio de salida para los datos (por defecto: ./data)",
+        help="Directorio de salida para los datos",
+    ),
+    setup: bool = typer.Option(
+        False,
+        "--setup",
+        help="Ejecutar wizard de configuración",
+    ),
+) -> None:
+    """🛸 Ejecutar misión de scraping con TUI moderna."""
+    asyncio.run(
+        _run_async(
+            url=url,
+            config_path=config_path,
+            scope=scope,
+            workers=workers,
+            only_text=only_text,
+            output_dir=output_dir,
+            setup=setup,
+        )
     )
 
-    args = parser.parse_args()
 
-    mission_url = args.url
-    mission_scope = args.scope
-    mission_extract_assets = not args.only_text
+async def _run_async(
+    url: str | None,
+    config_path: Path | None,
+    scope: str,
+    workers: int | None,
+    only_text: bool,
+    output_dir: Path | None,
+    setup: bool,
+) -> None:
+    """Async implementation of the scrape command."""
+    from uif_scraper.tui.app import UIFDashboardApp
 
-    if args.setup:
+    mission_url = url
+    mission_scope = scope
+    mission_extract_assets = not only_text
+
+    if setup:
         await run_wizard()
         return
 
     if not mission_url:
         wizard_data = await run_mission_wizard()
         if not wizard_data:
-            print("Operación cancelada.")
+            console.print("[red]Operación cancelada.[/]")
             return
         mission_url = wizard_data["url"]
         mission_scope = wizard_data["scope"]
         mission_extract_assets = wizard_data["mode"] == "full"
 
-    config = load_config_with_overrides(args.config)
-    if args.workers:
-        config.default_workers = args.workers
+    config = load_config_with_overrides(config_path)
+    if workers:
+        config.default_workers = workers
 
-    # Directorio de salida (CLI override > config > default)
-    if args.output_dir:
-        config.data_dir = args.output_dir
+    if output_dir:
+        config.data_dir = output_dir
 
-    # Resolver data_dir relativo al directorio actual de ejecución si no es absoluto
     if not config.data_dir.is_absolute():
         config.data_dir = Path.cwd() / "data"
 
@@ -146,20 +173,26 @@ async def main_async() -> None:
     state = StateManager(
         pool,
         stats_cache_ttl=config.stats_cache_ttl_seconds,
-        batch_interval=1.0,  # Flush cada 1 segundo
-        batch_size=100,  # O cada 100 actualizaciones
+        batch_interval=1.0,
+        batch_size=100,
     )
 
     text_extractor = TextExtractor()
-    metadata_extractor = MetadataExtractor(
-        cache_size=1000
-    )  # LRU cache para contenido repetido
+    metadata_extractor = MetadataExtractor(cache_size=1000)
     asset_extractor = AssetExtractor(project_data_dir)
 
     navigation_service = NavigationService(mission_url, ScrapingScope(mission_scope))
     reporter_service = ReporterService(console, state)
 
-    engine = UIFMigrationEngine(
+    # Create the TUI app first (without engine reference)
+    tui_app = UIFDashboardApp(
+        mission_url=mission_url,
+        scope=mission_scope,
+        worker_count=config.default_workers,
+    )
+
+    # Create engine with TUI app reference
+    engine = UIFMigrationEngineV2(
         config=config,
         state=state,
         text_extractor=text_extractor,
@@ -168,37 +201,41 @@ async def main_async() -> None:
         navigation_service=navigation_service,
         reporter_service=reporter_service,
         extract_assets=mission_extract_assets,
+        tui_app=tui_app,
     )
 
-    # Setup graceful shutdown
-    shutdown_event = asyncio.Event()
-    _setup_signal_handlers(shutdown_event)
-
-    # Connect shutdown event to engine
-    async def monitor_shutdown() -> None:
-        await shutdown_event.wait()
-        engine.request_shutdown()
-
-    shutdown_monitor = asyncio.create_task(monitor_shutdown())
+    # Set the engine factory to run as background worker
+    tui_app._engine_factory = engine.run  # type: ignore[assignment]
 
     try:
-        # Iniciar batch processor para actualizaciones de estado
         await state.start_batch_processor()
-        await engine.run()
+        # Run the TUI app asynchronously (we're already in an async context)
+        # Textual handles Ctrl+C and worker lifecycle automatically via its worker system
+        await tui_app.run_async()
     except asyncio.CancelledError:
         console.print("[yellow]⚠️  Operation cancelled by user[/]")
     finally:
-        shutdown_monitor.cancel()
-        with contextlib.suppress(asyncio.CancelledError):
-            await shutdown_monitor
-        # Detener batch processor y flushear pendientes
         await state.stop_batch_processor()
         await pool.close_all()
 
 
+@app.command()
+def config() -> None:
+    """⚙️  Abrir wizard de configuración."""
+    asyncio.run(run_wizard())
+
+
+@app.command()
+def version() -> None:
+    """📋 Mostrar versión."""
+    console.print("[bold magenta]UIF Scraper[/] [cyan]v3.0.0[/]")
+    console.print("[dim]Universal Ingestion Framework con Catppuccin Mocha theme[/]")
+
+
 def main() -> None:
+    """Entry point."""
     try:
-        asyncio.run(main_async())
+        app()
     except KeyboardInterrupt:
         console.print("\n[red]✋ Interrupted by user[/]")
 

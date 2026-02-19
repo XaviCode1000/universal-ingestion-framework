@@ -9,6 +9,7 @@ dependencies = [
     "aiohttp>=3.13.3",
     "aiosqlite>=0.22.1",
     "browserforge>=1.2.3",
+    "catppuccin>=2.4.0",
     "curl-cffi>=0.14.0",
     "ftfy>=6.3.1",
     "loguru>=0.7.3",
@@ -26,7 +27,9 @@ dependencies = [
     "rich>=14.2.0",
     "scrapling>=0.3.14",
     "selectolax>=0.4.6",
+    "textual>=3.0.0",
     "trafilatura>=2.0.0",
+    "typer>=0.15.0",
     "zstandard>=0.25.0",
 ]
 
