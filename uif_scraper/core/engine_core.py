@@ -43,6 +43,46 @@ from uif_scraper.utils.http_session import HTTPSessionCache
 from uif_scraper.utils.url_utils import slugify, smart_url_normalize
 
 
+# ============================================================================
+# FRONTMATTER FILTERING (RAG-optimized)
+# ============================================================================
+
+# Campos que van al YAML frontmatter (RAG-friendly)
+FRONTMATTER_FIELDS: set[str] = {
+    "url",
+    "title",
+    "author",
+    "date",
+    "sitename",
+    "description",
+    "keywords",
+    "og_title",
+    "og_description",
+    "og_image",
+    "og_type",
+    "twitter_card",
+    "twitter_site",
+    "ingestion_engine",
+}
+
+
+def filter_metadata_for_frontmatter(metadata: dict[str, Any]) -> dict[str, Any]:
+    """Filtra metadata para incluir solo campos relevantes en YAML frontmatter.
+
+    Excluye campos pesados como headers (TOC) y json_ld (structured data)
+    que inflan el frontmatter sin aportar valor al filtering RAG.
+
+    Args:
+        metadata: Metadata completa del documento
+
+    Returns:
+        Metadata filtrada para YAML frontmatter
+    """
+    filtered = {k: v for k, v in metadata.items() if k in FRONTMATTER_FIELDS}
+    # Solo incluir campos con valores no-vacíos
+    return {k: v for k, v in filtered.items() if v is not None and v != []}
+
+
 class _Sentinel(enum.Enum):
     """Sentinel value for signaling workers to stop.
 
@@ -319,12 +359,14 @@ class EngineCore:
                     # Completion = queues empty + all discovered URLs processed
                     queue_size = self.url_queue.qsize() + self.asset_queue.qsize()
                     seen_total = len(self.seen_urls) + len(self.seen_assets)
-                    
+
                     # Use processed_total (completed + failed) instead of just completed
                     # This ensures we terminate even when some assets fail (404, etc.)
                     processed_total = (
-                        self.pages_completed + self.pages_failed +
-                        self.assets_completed + self.assets_failed
+                        self.pages_completed
+                        + self.pages_failed
+                        + self.assets_completed
+                        + self.assets_failed
                     )
 
                     # Work is complete when:
@@ -632,8 +674,13 @@ class EngineCore:
         raw_slug = Path(rel_path).stem or "index"
         path_slug = slugify(raw_slug)
 
+        # Filter metadata for clean frontmatter (RAG-friendly)
+        frontmatter_metadata = filter_metadata_for_frontmatter(metadata)
+
         # Build content with frontmatter
-        frontmatter = yaml.dump(metadata, allow_unicode=True, sort_keys=False)
+        frontmatter = yaml.dump(
+            frontmatter_metadata, allow_unicode=True, sort_keys=False
+        )
         content = f"---\n{frontmatter}---\n\n{markdown}"
 
         # Ensure directory exists before writing
