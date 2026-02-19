@@ -3,6 +3,7 @@ import time
 from typing import Any
 
 import trafilatura
+from bs4 import BeautifulSoup
 from loguru import logger
 from markitdown import MarkItDown
 
@@ -18,11 +19,11 @@ class TextExtractor(IExtractor):
 
     async def extract(self, content: Any, url: str) -> dict[str, Any]:
         """Extrae texto como markdown usando trafilatura con fallback a MarkItDown.
-        
+
         Args:
             content: HTML crudo a procesar
             url: URL de origen para logging y debugging
-        
+
         Returns:
             Diccionario con markdown extraído y motor utilizado.
         """
@@ -44,7 +45,19 @@ class TextExtractor(IExtractor):
                 output_format="markdown",
             )
             elapsed_ms = (time.perf_counter() - start_time) * 1000
-            
+
+            # Log para debugging de contenido y resultado
+            logger.debug(
+                "Trafilatura extraction result",
+                extra={
+                    "url": url,
+                    "input_length": len(content),
+                    "output_length": len(extracted_md) if extracted_md else 0,
+                    "elapsed_ms": round(elapsed_ms, 2),
+                    "success": extracted_md is not None and len(extracted_md) >= 100,
+                },
+            )
+
             # Log métrica de performance para debugging
             if elapsed_ms > 1000:  # Más de 1 segundo es lento
                 logger.warning(
@@ -66,15 +79,23 @@ class TextExtractor(IExtractor):
             logger.warning("Trafilatura extraction failed", extra=error_context)
             extracted_md = None
 
-        # Fallback to MarkItDown if trafilatura result is insufficient
-        if not extracted_md or len(extracted_md) < 250:
+        # NIVEL 2: Fallback a MarkItDown si trafilatura es insuficiente
+        # Reducido de 250 a 100 chars para ser menos agresivo
+        if not extracted_md or len(extracted_md) < 100:
             try:
                 html_stream = io.BytesIO(content.encode("utf-8"))
                 conversion_result = self.md_converter.convert_stream(
                     html_stream, extension=".html"
                 )
-                extracted_md = conversion_result.text_content
-                engine = "markitdown"
+                if (
+                    conversion_result.text_content
+                    and len(conversion_result.text_content) > 50
+                ):
+                    extracted_md = conversion_result.text_content
+                    engine = "markitdown"
+                else:
+                    # MarkItDown devolvió muy poco, pasar al siguiente fallback
+                    raise ValueError("MarkItDown output too short")
             except Exception as e:
                 fallback_error_context = {
                     "url": url,
@@ -83,15 +104,37 @@ class TextExtractor(IExtractor):
                     "primary_engine": "trafilatura",
                     "fallback_engine": "markitdown",
                 }
-                logger.warning(
-                    "MarkItDown fallback failed", 
-                    extra=fallback_error_context
+                logger.debug(
+                    "MarkItDown fallback failed, trying BeautifulSoup",
+                    extra=fallback_error_context,
                 )
-                extracted_md = extracted_md or ""
-                engine = "trafilatura-fallback"
+
+                # NIVEL 3: Parachute con BeautifulSoup (siempre devuelve algo)
+                try:
+                    soup = BeautifulSoup(content, "lxml")
+                    # Extraer texto visible, descartando scripts/styles
+                    for script in soup(["script", "style", "nav", "footer", "header"]):
+                        script.decompose()
+                    text = soup.get_text(separator="\n", strip=True)
+                    # Limpiar líneas vacías excesivas
+                    lines = [line.strip() for line in text.splitlines() if line.strip()]
+                    extracted_md = "\n".join(lines[:100])  # Limitar a 100 líneas
+                    engine = "beautifulsoup-parachute"
+                    logger.info(
+                        "Used BeautifulSoup parachute fallback",
+                        extra={"url": url, "output_lines": len(lines)},
+                    )
+                except Exception as bs_error:
+                    # NIVEL 4: Último recurso - mensaje de error
+                    logger.warning(
+                        "All extraction methods failed",
+                        extra={"url": url, "bs_error": str(bs_error)},
+                    )
+                    extracted_md = f"[Content extraction failed for {url}]\n\nRaw HTML length: {len(content)} chars"
+                    engine = "extraction-failed"
 
         cleaned_markdown = clean_text(extracted_md)
-        
+
         # Log final result con longitud
         logger.debug(
             "Text extraction completed",
@@ -101,5 +144,5 @@ class TextExtractor(IExtractor):
                 "output_length": len(cleaned_markdown),
             },
         )
-        
+
         return {"markdown": cleaned_markdown, "engine": engine}

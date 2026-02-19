@@ -32,7 +32,9 @@ from uif_scraper.models import ScrapingScope
 # URLs de books.toscrape.com diseñadas para testing de scrapers
 # Esta URL tiene descripciones de libros que Trafilatura reconoce como contenido válido
 TEST_URL = "http://books.toscrape.com/catalogue/a-light-in-the-attic_1000/index.html"
-TEST_URL_PRODUCT = "http://books.toscrape.com/catalogue/a-light-in-the-attic_1000/index.html"
+TEST_URL_PRODUCT = (
+    "http://books.toscrape.com/catalogue/a-light-in-the-attic_1000/index.html"
+)
 
 
 @pytest.mark.browser
@@ -110,15 +112,28 @@ async def test_browser_scrape_single_page(tmp_path):
             assert row is not None, "URL no encontrada en DB"
             assert row[0] == "completed", f"Estado esperado 'completed', fue '{row[0]}'"
 
-    # Verificar que se creó el archivo Markdown
+    # Verificar que se creó el archivo Markdown (puede estar comprimido con zstd o gzip)
     content_dir = tmp_path / "content"
     assert content_dir.exists(), "Directorio de contenido no creado"
 
-    md_files = list(content_dir.glob("*.md"))
-    assert len(md_files) >= 1, "No se creó archivo Markdown"
+    # Buscar archivos markdown (sin comprimir o comprimidos)
+    md_files = (
+        list(content_dir.glob("*.md"))
+        or list(content_dir.glob("*.md.zst"))
+        or list(content_dir.glob("*.md.gz"))
+    )
+    assert len(md_files) >= 1, (
+        f"No se creó archivo Markdown. Archivos en content: {list(content_dir.iterdir())}"
+    )
 
-    # Verificar contenido del Markdown
-    md_content = md_files[0].read_text()
+    # Leer contenido (manejar compresión automáticamente)
+    md_path = md_files[0]
+    if md_path.suffix in (".zst", ".gz"):
+        from uif_scraper.utils.compression import read_compressed_markdown
+
+        md_content = await read_compressed_markdown(md_path)
+    else:
+        md_content = md_path.read_text()
     assert "---" in md_content, "Sin frontmatter YAML"
     assert "title:" in md_content, "Sin título en frontmatter"
     assert len(md_content) > 100, "Contenido muy corto"
@@ -223,12 +238,22 @@ async def test_browser_full_mission_mini(tmp_path):
             assert row is not None, "No se pudo obtener el conteo"
             assert row[0] >= 1, "Al menos 1 URL en DB"
 
-    # Verificar que se creó contenido
+    # Verificar que se creó contenido (manejar compresión zstd/gzip)
     content_dir = tmp_path / "content"
     if content_dir.exists():
-        md_files = list(content_dir.glob("*.md"))
+        md_files = (
+            list(content_dir.glob("*.md"))
+            or list(content_dir.glob("*.md.zst"))
+            or list(content_dir.glob("*.md.gz"))
+        )
         if md_files:
-            md_content = md_files[0].read_text()
+            md_path = md_files[0]
+            if md_path.suffix in (".zst", ".gz"):
+                from uif_scraper.utils.compression import read_compressed_markdown
+
+                md_content = await read_compressed_markdown(md_path)
+            else:
+                md_content = md_path.read_text()
             assert len(md_content) > 50, "Contenido muy corto"
 
     await pool.close_all()
