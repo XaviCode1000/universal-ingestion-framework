@@ -48,12 +48,18 @@ class TestShouldFollow:
 class TestIsAsset:
     """Tests para detección de assets."""
 
-    @pytest.mark.parametrize("url", [
-        "https://example.com/img.png",
-        "https://example.com/doc.pdf",
-        "https://example.com/file.JPG",  # case insensitive
-        "https://example.com/photo.webp",
-    ])
+    @pytest.mark.parametrize(
+        "url",
+        [
+            "https://example.com/img.png",
+            "https://example.com/doc.pdf",
+            "https://example.com/file.JPG",  # case insensitive
+            "https://example.com/photo.webp",
+            "https://example.com/readme.md",  # markdown files
+            "https://example.com/notes.txt",  # text files
+            "https://example.com/data.csv",  # data files
+        ],
+    )
     def test_detects_assets(self, url):
         nav = NavigationService(BASE)
         assert nav.is_asset(url)
@@ -66,13 +72,16 @@ class TestIsAsset:
 class TestIsNoise:
     """Tests para detección de ruido (archivos a ignorar)."""
 
-    @pytest.mark.parametrize("url", [
-        "https://example.com/style.css",
-        "https://example.com/app.js",
-        "https://example.com/data.json",
-        "https://example.com/feed.xml",
-        "https://example.com/favicon.ico",
-    ])
+    @pytest.mark.parametrize(
+        "url",
+        [
+            "https://example.com/style.css",
+            "https://example.com/app.js",
+            "https://example.com/data.json",
+            "https://example.com/feed.xml",
+            "https://example.com/favicon.ico",
+        ],
+    )
     def test_detects_noise(self, url):
         nav = NavigationService(BASE)
         assert nav.is_noise(url)

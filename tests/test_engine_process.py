@@ -1,5 +1,6 @@
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import asyncio
 import pytest
 
 from uif_scraper.config import ScraperConfig
@@ -65,6 +66,10 @@ async def test_engine_process_page_full(tmp_path):
         await engine.process_page(session, TEST_URL)
         assert "https://webscraper.io/other" in engine.seen_urls
         assert "https://webscraper.io/img.png" in engine.seen_assets
+
+        # Esperar que el batch processor flushee las actualizaciones de estado
+        await asyncio.sleep(1.1)
+        await state.stop_batch_processor()  # Forzar flush final
 
         async with pool.acquire() as db:
             async with db.execute(

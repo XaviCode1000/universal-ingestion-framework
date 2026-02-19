@@ -96,6 +96,10 @@ async def test_browser_scrape_single_page(tmp_path):
         await engine.process_page(session, url)
         engine.url_queue.task_done()
 
+    # Esperar que el batch processor flushee las actualizaciones de estado
+    await asyncio.sleep(1.1)
+    await state.stop_batch_processor()  # Forzar flush final
+
     # Verificar que se completó
     async with pool.acquire() as db:
         async with db.execute(
