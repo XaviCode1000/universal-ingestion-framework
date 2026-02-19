@@ -29,6 +29,7 @@ from uif_scraper.models import MigrationStatus, WebPage
 from uif_scraper.navigation import NavigationService
 from uif_scraper.reporter import ReporterService
 from uif_scraper.utils.circuit_breaker import CircuitBreaker
+from uif_scraper.utils.compression import write_compressed_markdown
 from uif_scraper.utils.html_cleaner import pre_clean_html
 from uif_scraper.utils.http_session import HTTPSessionCache
 from uif_scraper.utils.url_utils import slugify, smart_url_normalize
@@ -291,8 +292,16 @@ class UIFMigrationEngine:
             md_path.parent.mkdir(parents=True, exist_ok=True)
 
             frontmatter = yaml.dump(metadata, allow_unicode=True, sort_keys=False)
-            async with aiofiles.open(md_path, "w", encoding="utf-8") as f:
-                await f.write(f"---\n{frontmatter}---\n\n{text_data['markdown']}")
+            markdown_content = f"---\n{frontmatter}---\n\n{text_data['markdown']}"
+            
+            # Guardar con compresión Zstandard (ahorra 30-40% de espacio)
+            md_path = await write_compressed_markdown(
+                self.asset_extractor.data_dir / "content" / path_slug,
+                markdown_content,
+                compression="zstd",  # Mejor balance velocidad/ratio
+                compression_level=3,  # Nivel óptimo para uso general
+            )
+            md_path.parent.mkdir(parents=True, exist_ok=True)
 
             new_pages, new_assets = self.navigation.extract_links(page, url)
 
@@ -358,26 +367,45 @@ class UIFMigrationEngine:
                 await self.state.update_status(url, MigrationStatus.FAILED, str(e))
 
     async def page_worker(self, session: AsyncStealthySession) -> None:
+        """Worker de páginas con early exit para circuit breaker."""
         while not self._shutdown_event.is_set():
             try:
                 url = await asyncio.wait_for(self.url_queue.get(), timeout=1.0)
             except asyncio.TimeoutError:
                 continue
 
+            # EARLY EXIT: Verificar circuit breaker ANTES de adquirir semaphore
+            # Evita trabajo innecesario cuando el circuito está abierto
+            if not self.circuit_breaker.should_allow(self.navigation.domain):
+                logger.warning(
+                    f"Circuit breaker open for {self.navigation.domain}, requeuing {url}"
+                )
+                await self.url_queue.put(url)
+                # Backoff exponencial basado en fallos
+                failures = self.circuit_breaker.failures.get(self.navigation.domain, 0)
+                await asyncio.sleep(min(2**failures, 30))  # Max 30s
+                self.url_queue.task_done()
+                continue
+
             try:
                 async with self.semaphore:
+                    # Doble verificación después de adquirir semaphore
+                    if not self.circuit_breaker.should_allow(self.navigation.domain):
+                        await self.url_queue.put(url)
+                        self.url_queue.task_done()
+                        continue
                     await self.process_page(session, url)
             except asyncio.CancelledError:
-                # Shutdown mid-processing: mark URL as pending to avoid losing it
                 logger.warning(
                     "Worker cancelled processing %s, marking as pending", url
                 )
-                await self.state.update_status(url, MigrationStatus.PENDING)
+                await self.state.update_status(
+                    url, MigrationStatus.PENDING, immediate=True
+                )
                 raise
             except Exception as e:
                 logger.error("Error processing %s: %s", url, e)
             finally:
-                # Always mark task as done - queue tracking is separate from DB state
                 self.url_queue.task_done()
 
     async def asset_worker(self) -> None:

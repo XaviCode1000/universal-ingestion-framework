@@ -143,7 +143,7 @@ async def main_async() -> None:
     )
 
     text_extractor = TextExtractor()
-    metadata_extractor = MetadataExtractor()
+    metadata_extractor = MetadataExtractor(cache_size=1000)  # LRU cache para contenido repetido
     asset_extractor = AssetExtractor(project_data_dir)
 
     navigation_service = NavigationService(mission_url, ScrapingScope(mission_scope))

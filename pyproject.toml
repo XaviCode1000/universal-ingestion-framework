@@ -27,6 +27,7 @@ dependencies = [
     "scrapling>=0.3.14",
     "selectolax>=0.4.6",
     "trafilatura>=2.0.0",
+    "zstandard>=0.25.0",
 ]
 
 [build-system]
