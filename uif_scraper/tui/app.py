@@ -9,7 +9,7 @@ Architecture:
 """
 
 from pathlib import Path
-from typing import TYPE_CHECKING, Callable, Coroutine
+from typing import TYPE_CHECKING, Any, Callable, Coroutine
 
 from textual import work
 from textual.app import App, ComposeResult
@@ -109,7 +109,7 @@ class UIFDashboardApp(App[None]):
         scope: str = "smart",
         worker_count: int = 5,
         engine_factory: Callable[[], Coroutine[None, None, None]] | None = None,
-        **kwargs,
+        **kwargs: Any,
     ) -> None:
         super().__init__(**kwargs)
         self._mission_url = mission_url
@@ -117,6 +117,7 @@ class UIFDashboardApp(App[None]):
         self._worker_count = worker_count
         self._engine_factory = engine_factory
         self._update_timer: Timer | None = None
+        self._engine_completed: bool = False  # Track engine completion explicitly
 
     def compose(self) -> ComposeResult:
         """Compose the main layout."""
@@ -162,11 +163,22 @@ class UIFDashboardApp(App[None]):
         """Run the scraping engine as a Textual worker.
 
         This method is decorated with @work to integrate with Textual's
-        worker lifecycle management. When the engine completes, the
-        on_worker_state_changed handler will exit the app.
+        worker lifecycle management. When the engine completes, it sets
+        _engine_completed flag and schedules app exit with safety timeout.
         """
         if self._engine_factory:
-            await self._engine_factory()
+            try:
+                await self._engine_factory()
+                # CRITICAL: Mark engine as completed BEFORE scheduling exit
+                # This ensures we detect completion even if worker state doesn't propagate
+                self._engine_completed = True
+            except Exception:
+                # Let on_worker_state_changed handle errors
+                raise
+            finally:
+                # SAFETY: Always schedule exit after engine finishes (success or error)
+                # This prevents the app from hanging if worker state doesn't propagate
+                self.call_later(self._safe_exit)
 
     def on_worker_state_changed(self, event: Worker.StateChanged) -> None:
         """Handle worker state changes.
@@ -193,6 +205,23 @@ class UIFDashboardApp(App[None]):
         elif event.state == WorkerState.CANCELLED:
             # User cancelled - exit silently
             self.call_later(self.exit)
+
+    def _safe_exit(self) -> None:
+        """Safety exit handler that ensures app terminates.
+
+        This is called after engine completes as a fallback in case
+        on_worker_state_changed doesn't receive the SUCCESS state.
+        Prevents the app from hanging indefinitely.
+        """
+        if self._engine_completed:
+            # Engine finished successfully
+            self.notify(
+                "Scraping completed successfully!", title="Done", severity="information"
+            )
+        else:
+            # Engine didn't complete normally - force exit anyway
+            self.notify("Engine terminated.", title="Exit", severity="warning")
+        self.exit()
 
     def _tick(self) -> None:
         """Periodic update callback."""

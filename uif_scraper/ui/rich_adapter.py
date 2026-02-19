@@ -110,7 +110,9 @@ class RichDashboard:
 
         # Combine progress and metrics in a simple table
         from rich.console import Group
+        from rich.console import RenderableType
 
+        content: RenderableType
         if self._progress:
             content = Group(self._progress, metrics)
         else:

@@ -1,5 +1,7 @@
 """Stats Panel Widget - Displays progress and metrics."""
 
+from typing import Any
+
 from time import time
 
 from textual.app import ComposeResult
@@ -84,7 +86,7 @@ class StatsPanel(Vertical):
         pages_total: int = 0,
         assets_completed: int = 0,
         assets_total: int = 0,
-        **kwargs,
+        **kwargs: Any,
     ) -> None:
         super().__init__(**kwargs)
         self._pages_completed_init = pages_completed

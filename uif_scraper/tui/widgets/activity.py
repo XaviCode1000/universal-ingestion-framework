@@ -1,5 +1,7 @@
 """Activity Panel Widget - Displays recent ingestion activity."""
 
+from typing import Any
+
 from textual.app import ComposeResult
 from textual.containers import Vertical, VerticalScroll
 from textual.message import Message
@@ -53,7 +55,7 @@ class ActivityItem(Vertical):
     time_ago: reactive[str] = reactive("")
 
     def __init__(
-        self, title: str, engine: str = "unknown", time_ago: str = "", **kwargs
+        self, title: str, engine: str = "unknown", time_ago: str = "", **kwargs: Any
     ) -> None:
         super().__init__(**kwargs)
         self.title = title
@@ -117,7 +119,7 @@ class ActivityPanel(Vertical):
     # Reactive list of activities
     activities: reactive[list[dict[str, str]]] = reactive(list)
 
-    def __init__(self, max_items: int = 8, **kwargs) -> None:
+    def __init__(self, max_items: int = 8, **kwargs: Any) -> None:
         super().__init__(**kwargs)
         self.max_items = max_items
 
@@ -162,7 +164,9 @@ class ActivityPanel(Vertical):
         except (ValueError, TypeError):
             return ""
 
-    def watch_activities(self, old: list, new: list) -> None:  # noqa: ARG002
+    def watch_activities(
+        self, old: list[dict[str, str]], new: list[dict[str, str]]
+    ) -> None:  # noqa: ARG002
         """React to activities changes."""
         self._render_activities()
 
