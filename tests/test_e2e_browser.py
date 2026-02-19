@@ -29,9 +29,10 @@ from uif_scraper.navigation import NavigationService
 from uif_scraper.reporter import ReporterService
 from uif_scraper.models import ScrapingScope
 
-# URLs de webscraper.io diseñadas para testing de scrapers
-TEST_URL = "https://webscraper.io/test-sites/e-commerce/static"
-TEST_URL_PRODUCT = "https://webscraper.io/test-sites/e-commerce/static/product/1"
+# URLs de books.toscrape.com diseñadas para testing de scrapers
+# Esta URL tiene descripciones de libros que Trafilatura reconoce como contenido válido
+TEST_URL = "http://books.toscrape.com/catalogue/a-light-in-the-attic_1000/index.html"
+TEST_URL_PRODUCT = "http://books.toscrape.com/catalogue/a-light-in-the-attic_1000/index.html"
 
 
 @pytest.mark.browser
@@ -88,7 +89,7 @@ async def test_browser_scrape_single_page(tmp_path):
     async with AsyncStealthySession(
         headless=True,
         max_pages=1,
-        solve_cloudflare=True,
+        # solve_cloudflare=False,  # books.toscrape.com no necesita Cloudflare solving
         additional_args={"args": ["--disable-gpu", "--no-sandbox"]},
     ) as session:
         # Procesar la página
