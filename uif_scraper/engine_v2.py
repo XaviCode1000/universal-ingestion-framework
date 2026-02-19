@@ -2,8 +2,6 @@
 
 This is a thin wrapper around EngineCore that adds Textual UI integration.
 The heavy lifting is done by EngineCore - this file only handles UI setup.
-
-Lines reduced: ~520 → ~80 (85% reduction)
 """
 
 import asyncio
@@ -13,10 +11,7 @@ from loguru import logger
 from scrapling.fetchers import AsyncStealthySession
 
 from uif_scraper.config import ScraperConfig
-from uif_scraper.core.engine_core import (
-    EngineCore,
-    _STOP_SENTINEL,
-)
+from uif_scraper.core.engine_core import EngineCore, _STOP_SENTINEL
 from uif_scraper.db_manager import StateManager
 from uif_scraper.extractors.asset_extractor import AssetExtractor
 from uif_scraper.extractors.metadata_extractor import MetadataExtractor
@@ -26,45 +21,6 @@ from uif_scraper.reporter import ReporterService
 
 if TYPE_CHECKING:
     from uif_scraper.tui.app import UIFDashboardApp
-
-
-class TextualUICallback:
-    """Adapter to forward EngineCore updates to Textual TUI.
-
-    Implements the observer pattern - EngineCore calls these methods
-    and we forward to the Textual app via message passing.
-    """
-
-    def __init__(self, app: "UIFDashboardApp", core: EngineCore) -> None:
-        self._app = app
-        self._core = core
-
-    def update(self) -> None:
-        """Send full state update to TUI."""
-        # Progress
-        stats = self._core.get_stats()
-        self._app.update_progress(
-            pages_completed=stats.pages_completed,
-            pages_total=stats.pages_total,
-            assets_completed=stats.assets_completed,
-            assets_total=stats.assets_total,
-            seen_urls=stats.seen_urls,
-            seen_assets=stats.seen_assets,
-        )
-
-        # Status
-        self._app.update_status(
-            circuit_state=self._core.circuit_breaker.get_state(
-                self._core.navigation.domain
-            ),
-            queue_pending=stats.queue_pending,
-            error_count=stats.error_count,
-            browser_mode=self._core.use_browser_mode,
-        )
-
-    def on_activity(self, title: str, engine: str) -> None:
-        """Add activity entry."""
-        self._app.add_activity(title, engine)
 
 
 class UIFMigrationEngineV2:
@@ -104,7 +60,6 @@ class UIFMigrationEngineV2:
 
         # UI setup
         self._tui_app = tui_app
-        self._ui_callback: TextualUICallback | None = None
 
         # Expose core properties for backward compatibility
         self.config = config
@@ -117,10 +72,6 @@ class UIFMigrationEngineV2:
         This is designed to be called as a background task from within
         the Textual app's on_mount handler.
         """
-        # Set up UI callback if app is available
-        if self._tui_app:
-            self._ui_callback = TextualUICallback(self._tui_app, self._core)
-
         # Run the core engine
         await self._run_with_ui_updates()
 
@@ -244,6 +195,54 @@ class UIFMigrationEngineV2:
         await self._core.http_cache.close()
 
     def _update_ui(self) -> None:
-        """Send update to Textual TUI."""
-        if self._ui_callback:
-            self._ui_callback.update()
+        """Send update to Textual TUI using thread-safe message passing.
+
+        Uses call_from_thread to safely post messages from the async worker
+        to Textual's main thread.
+        """
+        if not self._tui_app:
+            return
+
+        # Import message types locally to avoid circular imports
+        from uif_scraper.tui.app import (
+            EngineActivity,
+            EngineProgress,
+            EngineStatus,
+        )
+
+        # Get stats and post progress update
+        stats = self._core.get_stats()
+        self._tui_app.call_from_thread(
+            self._tui_app.post_message,
+            EngineProgress(
+                pages_completed=stats.pages_completed,
+                pages_total=stats.pages_total,
+                assets_completed=stats.assets_completed,
+                assets_total=stats.assets_total,
+                seen_urls=stats.seen_urls,
+                seen_assets=stats.seen_assets,
+            ),
+        )
+
+        # Post status update
+        self._tui_app.call_from_thread(
+            self._tui_app.post_message,
+            EngineStatus(
+                circuit_state=self._core.circuit_breaker.get_state(
+                    self._core.navigation.domain
+                ),
+                queue_pending=stats.queue_pending,
+                error_count=stats.error_count,
+                browser_mode=self._core.use_browser_mode,
+            ),
+        )
+
+        # Post activity updates (last 3 entries)
+        for entry in self._core.activity_log[-3:]:
+            self._tui_app.call_from_thread(
+                self._tui_app.post_message,
+                EngineActivity(
+                    title=entry["title"],
+                    engine=entry["engine"],
+                ),
+            )
