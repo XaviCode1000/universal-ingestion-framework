@@ -51,6 +51,7 @@ async def write_compressed_markdown(
         compressed_content = cctx.compress(content_bytes)
         async with aiofiles.open(compressed_path, "wb") as f:
             await f.write(compressed_content)
+            await f.flush()  # CRITICAL: Explicit flush to ensure write completes
         return compressed_path
 
     elif compression == "gzip":
@@ -58,6 +59,7 @@ async def write_compressed_markdown(
         compressed_path = path.with_suffix(".md.gz")
         async with aiofiles.open(compressed_path, "wb") as f:
             await f.write(gzip.compress(content_bytes, compresslevel=6))
+            await f.flush()  # CRITICAL: Explicit flush to ensure write completes
         return compressed_path
 
     else:
@@ -65,6 +67,7 @@ async def write_compressed_markdown(
         md_path = path.with_suffix(".md")
         async with aiofiles.open(md_path, "w", encoding="utf-8") as f:
             await f.write(content)
+            await f.flush()  # CRITICAL: Explicit flush to ensure write completes
         return md_path
 
 

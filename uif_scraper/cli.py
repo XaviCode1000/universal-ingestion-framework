@@ -218,8 +218,20 @@ async def _run_async(
     except asyncio.CancelledError:
         console.print("[yellow]⚠️  Operation cancelled by user[/]")
     finally:
+        # CRITICAL: Ensure all pending writes complete before closing
+        # This prevents data loss from buffered writes
+        console.print("[dim]🔄 Finalizing pending writes...[/]")
+
+        # Stop batch processor with explicit wait
         await state.stop_batch_processor()
+
+        # Give time for any remaining file operations to complete
+        await asyncio.sleep(0.5)
+
+        # Close all database connections
         await pool.close_all()
+
+        console.print("[dim]✅ Shutdown complete[/]")
 
 
 @app.command()

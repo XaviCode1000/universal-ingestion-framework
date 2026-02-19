@@ -7,6 +7,7 @@ Reference: AGENTS.md - SRP (Single Responsibility Principle)
 """
 
 import asyncio
+import enum
 import json
 from abc import ABC, abstractmethod
 from pathlib import Path
@@ -40,9 +41,22 @@ from uif_scraper.utils.html_cleaner import pre_clean_html
 from uif_scraper.utils.http_session import HTTPSessionCache
 from uif_scraper.utils.url_utils import slugify, smart_url_normalize
 
-# Sentinel object to signal workers to stop
-# Using a unique object ensures no collision with actual data
-_STOP_SENTINEL = object()
+
+class _Sentinel(enum.Enum):
+    """Sentinel value for signaling workers to stop.
+
+    Using Enum is the recommended pattern for mypy compatibility.
+    Reference: https://stackoverflow.com/questions/57959664/handling-conditional-logic-sentinel-value-with-mypy
+    """
+
+    STOP = object()
+
+
+# Sentinel instance to signal workers to stop
+_STOP_SENTINEL = _Sentinel.STOP
+
+# Type alias for queue items - URL string or stop sentinel
+QueueItem = str | _Sentinel
 
 if TYPE_CHECKING:
     pass
@@ -121,9 +135,9 @@ class EngineCore:
             timeout_total=config.timeout_seconds,
         )
 
-        # Queues
-        self.url_queue: asyncio.Queue[str] = asyncio.Queue()
-        self.asset_queue: asyncio.Queue[str] = asyncio.Queue()
+        # Queues - use QueueItem type to allow sentinel values
+        self.url_queue: asyncio.Queue[QueueItem] = asyncio.Queue()
+        self.asset_queue: asyncio.Queue[QueueItem] = asyncio.Queue()
 
         # State tracking
         self.seen_urls: set[str] = set()
@@ -288,16 +302,35 @@ class EngineCore:
 
             try:
                 # Main loop - monitor progress
+                # Best Practice: Track completion via work counters, not worker state
+                # Workers stay alive waiting for queue.get() - they're never "done"
+                # until we send sentinels in _graceful_shutdown()
+                consecutive_empty_checks = 0
                 while not self._shutdown_event.is_set():
                     self._notify_ui()
 
-                    # Check completion
-                    if (
-                        self.url_queue.empty()
-                        and self.asset_queue.empty()
-                        and all(w.done() for w in all_workers)
+                    # Check completion based on work state, not worker state
+                    # Workers are always "pending" while waiting for queue.get()
+                    # Completion = queues empty + all discovered URLs processed
+                    queue_size = self.url_queue.qsize() + self.asset_queue.qsize()
+                    seen_total = len(self.seen_urls) + len(self.seen_assets)
+                    completed_total = self.pages_completed + self.assets_completed
+
+                    # Work is complete when:
+                    # 1. Queues are empty (no pending work)
+                    # 2. All seen items are completed (or we're in shutdown)
+                    if queue_size == 0 and (
+                        completed_total >= seen_total or self._shutdown_event.is_set()
                     ):
-                        break
+                        consecutive_empty_checks += 1
+                        if consecutive_empty_checks >= 3:
+                            logger.info(
+                                f"✅ Work complete - {self.pages_completed} pages, "
+                                f"{self.assets_completed} assets processed"
+                            )
+                            break
+                    else:
+                        consecutive_empty_checks = 0
 
                     await asyncio.sleep(0.25)
 
@@ -333,17 +366,20 @@ class EngineCore:
         """
         while not self._shutdown_event.is_set():
             try:
-                url = await asyncio.wait_for(
+                item: QueueItem = await asyncio.wait_for(
                     self.url_queue.get(), timeout=DEFAULT_QUEUE_TIMEOUT_SECONDS
                 )
             except asyncio.TimeoutError:
                 continue
 
             # Check for sentinel - signal to stop
-            if url is _STOP_SENTINEL:
+            if item is _STOP_SENTINEL:
                 logger.debug("Page worker received stop sentinel, exiting")
                 self.url_queue.task_done()
                 break
+
+            # Type narrowing: after sentinel check, item is str
+            url: str = item
 
             # Early exit for circuit breaker
             if not self.circuit_breaker.should_allow(self.navigation.domain):
@@ -387,17 +423,20 @@ class EngineCore:
         """
         while not self._shutdown_event.is_set():
             try:
-                url = await asyncio.wait_for(
+                item: QueueItem = await asyncio.wait_for(
                     self.asset_queue.get(), timeout=DEFAULT_QUEUE_TIMEOUT_SECONDS
                 )
             except asyncio.TimeoutError:
                 continue
 
             # Check for sentinel - signal to stop
-            if url is _STOP_SENTINEL:
+            if item is _STOP_SENTINEL:
                 logger.debug("Asset worker received stop sentinel, exiting")
                 self.asset_queue.task_done()
                 break
+
+            # Type narrowing: after sentinel check, item is str
+            url: str = item
 
             try:
                 await self._download_asset(url)
@@ -448,6 +487,10 @@ class EngineCore:
 
             # Save markdown
             md_path = await self._save_markdown(url, metadata, text_data["markdown"])
+
+            # CRITICAL: Allow buffer flush to disk before continuing
+            # This ensures file writes complete even if shutdown is triggered
+            await asyncio.sleep(0.1)
 
             # Extract and queue new links
             new_pages, new_assets = self.navigation.extract_links(page, url)
@@ -668,12 +711,43 @@ class EngineCore:
                 await f.write(json.dumps(data.model_dump(mode="json")) + "\n")
 
     async def _graceful_shutdown(self, workers: list[asyncio.Task[None]]) -> None:
-        """Gracefully shutdown workers with adaptive timeout."""
+        """Gracefully shutdown workers with sentinel pattern.
+
+        Best Practice (from Python asyncio docs):
+        1. Send ONE sentinel per worker to signal termination
+        2. Workers receive sentinel and exit cleanly
+        3. Wait for all workers to complete with timeout
+        4. Cancel any remaining workers after timeout
+
+        Reference: https://docs.python.org/3/library/asyncio-queue.html
+        """
         self._shutdown_event.set()
 
+        # CRITICAL: Send sentinels to ALL workers so they can exit cleanly
+        # Each worker needs its own sentinel to break out of queue.get()
+        # This is the standard pattern for graceful worker shutdown
+        num_page_workers = len(self._page_workers)
+        num_asset_workers = len(self._asset_workers)
+
+        logger.info(
+            f"Sending {num_page_workers} page sentinels + {num_asset_workers} asset sentinels"
+        )
+
+        # Send one sentinel per page worker
+        for _ in range(num_page_workers):
+            await self.url_queue.put(_STOP_SENTINEL)
+
+        # Send one sentinel per asset worker
+        for _ in range(num_asset_workers):
+            await self.asset_queue.put(_STOP_SENTINEL)
+
+        # Calculate adaptive timeout based on pending work
         pending_urls = self.url_queue.qsize()
         pending_assets = self.asset_queue.qsize()
         total_pending = pending_urls + pending_assets
+
+        # Subtract sentinels we just added
+        total_pending -= num_page_workers + num_asset_workers
 
         if total_pending > 0:
             timeout = max(MIN_SHUTDOWN_TIMEOUT_SECONDS, total_pending * 2.0)
@@ -682,6 +756,7 @@ class EngineCore:
             )
         else:
             timeout = MIN_SHUTDOWN_TIMEOUT_SECONDS
+            logger.info("No pending tasks, waiting for workers to receive sentinels")
 
         if workers:
             done, pending = await asyncio.wait(
@@ -689,11 +764,20 @@ class EngineCore:
             )
 
             if pending:
+                logger.warning(
+                    f"{len(pending)} workers did not finish in time, cancelling"
+                )
                 for w in pending:
-                    logger.warning(f"Worker {w.get_name()} did not finish, cancelling")
                     w.cancel()
 
+                # Wait for cancellation to complete
                 await asyncio.wait(pending, timeout=DEFAULT_SHUTDOWN_TIMEOUT_SECONDS)
+
+        # CRITICAL: Give time for pending file writes to flush to disk
+        await asyncio.sleep(0.5)
+        logger.info(
+            "✅ Graceful shutdown completed - all workers stopped and files flushed"
+        )
 
     # ========================================================================
     # UI NOTIFICATIONS
