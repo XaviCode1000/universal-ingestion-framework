@@ -145,6 +145,8 @@ class EngineCore:
         self.seen_assets: set[str] = set()
         self.pages_completed = 0
         self.assets_completed = 0
+        self.pages_failed = 0
+        self.assets_failed = 0
         self.error_count = 0
 
         # Concurrency control
@@ -173,6 +175,8 @@ class EngineCore:
             pages_total=len(self.seen_urls),
             assets_completed=self.assets_completed,
             assets_total=len(self.seen_assets),
+            pages_failed=self.pages_failed,
+            assets_failed=self.assets_failed,
             seen_urls=len(self.seen_urls),
             seen_assets=len(self.seen_assets),
             error_count=self.error_count,
@@ -315,19 +319,26 @@ class EngineCore:
                     # Completion = queues empty + all discovered URLs processed
                     queue_size = self.url_queue.qsize() + self.asset_queue.qsize()
                     seen_total = len(self.seen_urls) + len(self.seen_assets)
-                    completed_total = self.pages_completed + self.assets_completed
+                    
+                    # Use processed_total (completed + failed) instead of just completed
+                    # This ensures we terminate even when some assets fail (404, etc.)
+                    processed_total = (
+                        self.pages_completed + self.pages_failed +
+                        self.assets_completed + self.assets_failed
+                    )
 
                     # Work is complete when:
                     # 1. Queues are empty (no pending work)
-                    # 2. All seen items are completed (or we're in shutdown)
+                    # 2. All seen items are processed (completed or failed)
                     if queue_size == 0 and (
-                        completed_total >= seen_total or self._shutdown_event.is_set()
+                        processed_total >= seen_total or self._shutdown_event.is_set()
                     ):
                         consecutive_empty_checks += 1
                         if consecutive_empty_checks >= 3:
                             logger.info(
                                 f"✅ Work complete - {self.pages_completed} pages, "
-                                f"{self.assets_completed} assets processed"
+                                f"{self.assets_completed} assets processed "
+                                f"({self.pages_failed} pages, {self.assets_failed} assets failed)"
                             )
                             break
                     else:
@@ -548,6 +559,7 @@ class EngineCore:
                         raise Exception(f"HTTP {response.status}")
             except Exception as e:
                 self.error_count += 1
+                self.assets_failed += 1
                 await self.state.update_status(
                     asset_url, MigrationStatus.FAILED, str(e)
                 )
@@ -697,6 +709,7 @@ class EngineCore:
             await self.url_queue.put(url)
         else:
             await self.state.update_status(url, MigrationStatus.FAILED, str(error))
+            self.pages_failed += 1
 
     async def _log_event(self, data: WebPage, engine: str = "unknown") -> None:
         """Log event to file and activity log."""

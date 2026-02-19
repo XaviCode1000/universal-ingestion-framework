@@ -21,6 +21,8 @@ class EngineStats(BaseModel):
     pages_total: int = 0
     assets_completed: int = 0
     assets_total: int = 0
+    pages_failed: int = 0
+    assets_failed: int = 0
     seen_urls: int = 0
     seen_assets: int = 0
     error_count: int = 0

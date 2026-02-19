@@ -234,6 +234,15 @@
       "httpUrl": "https://mcp.exa.ai/mcp",
       "description": "Exa AI Search - Web search, code search, and company research",
       "timeout": 30000
+    },
+    "context7": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@upstash/context7-mcp",
+        "--api-key",
+        "ctx7sk-cc924a38-cd4c-4be8-a73a-17feaaa96c0e"
+      ]
     }
   },
 

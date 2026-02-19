@@ -33,14 +33,19 @@
   "mcpServers": {
     "exa": {
       "command": "npx",
-      "args": [
-        "-y",
-        "mcp-remote",
-        "https://mcp.exa.ai/mcp"
-      ],
+      "args": ["-y", "mcp-remote", "https://mcp.exa.ai/mcp"],
       "env": {
         "EXA_API_KEY": "5ee3e130-c2ea-4460-b0ad-1a3302197dab"
       }
+    },
+    "context7": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@upstash/context7-mcp",
+        "--api-key",
+        "ctx7sk-cc924a38-cd4c-4be8-a73a-17feaaa96c0e"
+      ]
     }
   },
   "security": {
@@ -53,3 +58,4 @@
   },
   "$version": 3
 }
+
