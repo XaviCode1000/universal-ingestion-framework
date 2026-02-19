@@ -30,6 +30,7 @@ from uif_scraper.navigation import NavigationService
 from uif_scraper.reporter import ReporterService
 from uif_scraper.utils.circuit_breaker import CircuitBreaker
 from uif_scraper.utils.html_cleaner import pre_clean_html
+from uif_scraper.utils.http_session import HTTPSessionCache
 from uif_scraper.utils.url_utils import slugify, smart_url_normalize
 
 
@@ -55,6 +56,11 @@ class UIFMigrationEngine:
 
         self.extract_assets = extract_assets
         self.circuit_breaker = CircuitBreaker()
+        self.http_cache = HTTPSessionCache(
+            max_pool_size=config.asset_workers * 2,
+            max_connections_per_host=10,
+            timeout_total=config.timeout_seconds,
+        )
 
         self.url_queue: asyncio.Queue[str] = asyncio.Queue()
         self.asset_queue: asyncio.Queue[str] = asyncio.Queue()
@@ -191,30 +197,27 @@ class UIFMigrationEngine:
             await self.asset_queue.put(asset)
 
     async def download_asset(self, asset_url: str) -> None:
+        """Descarga asset usando sesión HTTP reutilizable con connection pooling."""
         async with self.semaphore:
             try:
-                response = await AsyncFetcher.get(
-                    asset_url, impersonate="chrome", timeout=self.config.timeout_seconds
-                )
-                if response.status == 200:
-                    content = (
-                        response.body
-                        if isinstance(response.body, bytes)
-                        else response.body.encode()
-                    )
-                    await self.asset_extractor.extract(content, asset_url)
-                    await self.state.update_status(asset_url, MigrationStatus.COMPLETED)
-                    self.assets_completed += 1
-                    if self.progress and self.asset_task:
-                        self.progress.update(
-                            self.asset_task, completed=self.assets_completed
+                # Usar sesión HTTP reutilizable en lugar de crear nueva conexión
+                session = await self.http_cache.get_session()
+                async with session.get(asset_url) as response:
+                    if response.status == 200:
+                        content = await response.read()
+                        await self.asset_extractor.extract(content, asset_url)
+                        await self.state.update_status(
+                            asset_url, MigrationStatus.COMPLETED
                         )
-                else:
-                    raise Exception(f"HTTP {response.status}")
+                        self.assets_completed += 1
+                        if self.progress and self.asset_task:
+                            self.progress.update(
+                                self.asset_task, completed=self.assets_completed
+                            )
+                    else:
+                        raise Exception(f"HTTP {response.status}")
             except Exception as e:
-                await self.state.update_status(
-                    asset_url, MigrationStatus.FAILED, str(e)
-                )
+                await self.state.update_status(asset_url, MigrationStatus.FAILED, str(e))
 
     async def process_page(self, session: AsyncStealthySession, url: str) -> None:
         if not self.circuit_breaker.should_allow(self.navigation.domain):
@@ -528,7 +531,7 @@ class UIFMigrationEngine:
                             timeout=per_worker_timeout,
                             return_when=asyncio.ALL_COMPLETED,
                         )
-                        
+
                         # Cancel solo los que realmente están pendientes
                         if pending:
                             for w in pending:
@@ -536,8 +539,11 @@ class UIFMigrationEngine:
                                     f"Worker {w.get_name()} did not finish in time, cancelling"
                                 )
                                 w.cancel()
-                            
+
                             # Esperar confirmación de cancelación
                             await asyncio.wait(pending, timeout=5.0)
 
         await self.reporter.generate_summary()
+        
+        # Cerrar sesión HTTP para liberar conexiones
+        await self.http_cache.close()

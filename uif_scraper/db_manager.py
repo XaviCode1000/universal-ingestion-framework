@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import time
 from urllib.parse import urlparse
 
@@ -10,14 +11,31 @@ from uif_scraper.models import MigrationStatus
 class StateManager:
     """Gestión de estado de URLs con SQLite y pool de conexiones.
     
-    Incluye caché de estadísticas para reducir presión en la DB.
+    Incluye:
+    - Caché de estadísticas con TTL para reducir presión en DB
+    - Buffer de actualizaciones para batch processing
+    - Validación temprana de URLs
     """
 
-    def __init__(self, pool: SQLitePool, stats_cache_ttl: float = 5.0):
+    def __init__(
+        self,
+        pool: SQLitePool,
+        stats_cache_ttl: float = 5.0,
+        batch_interval: float = 1.0,
+        batch_size: int = 100,
+    ):
         self.pool = pool
         self._stats_cache: dict[str, int] | None = None
         self._stats_cached_at: float = 0
         self._stats_cache_ttl = stats_cache_ttl
+        
+        # Batch update buffers para reducir commits individuales
+        self._status_buffer: list[tuple[str, str, str | None]] = []
+        self._buffer_lock = asyncio.Lock()
+        self._batch_interval = batch_interval
+        self._batch_size = batch_size
+        self._batch_task: asyncio.Task[None] | None = None
+        self._flush_lock = asyncio.Lock()
 
     async def initialize(self) -> None:
         """Inicializa la tabla de URLs con índices optimizados."""
@@ -54,6 +72,59 @@ class StateManager:
                 "CREATE INDEX IF NOT EXISTS idx_status_type_retries ON urls(status, type, retries)"
             )
             await db.commit()
+
+    async def _start_batch_processor(self) -> None:
+        """Inicia procesador batch en background para flush periódico."""
+        
+        async def process_batches() -> None:
+            while True:
+                await asyncio.sleep(self._batch_interval)
+                await self._flush_status_buffer()
+        
+        self._batch_task = asyncio.create_task(process_batches())
+
+    async def _flush_status_buffer(self) -> None:
+        """Flushea buffer de actualizaciones en batch para reducir commits."""
+        async with self._flush_lock:
+            async with self._buffer_lock:
+                if not self._status_buffer:
+                    return
+                
+                batch = self._status_buffer.copy()
+                self._status_buffer.clear()
+            
+            if batch:
+                async with self.pool.acquire() as db:
+                    await db.executemany(
+                        """UPDATE urls 
+                           SET status = ?, last_error = ?, last_try = CURRENT_TIMESTAMP 
+                           WHERE url = ?""",
+                        [(status, url, error) for status, url, error in batch],
+                    )
+                    await db.commit()
+
+    async def start_batch_processor(self) -> None:
+        """Inicia el procesador batch explícitamente.
+        
+        Nota: El batch processor NO se inicia automáticamente en __init__.
+        Debe llamarse a este método explícitamente cuando se desea usar
+        buffering batch.
+        """
+        if self._batch_task is None:
+            await self._start_batch_processor()
+
+    async def stop_batch_processor(self) -> None:
+        """Detiene el procesador batch y flushea pendientes."""
+        if self._batch_task:
+            self._batch_task.cancel()
+            try:
+                await self._batch_task
+            except asyncio.CancelledError:
+                pass
+            self._batch_task = None
+        
+        # Flush final
+        await self._flush_status_buffer()
 
     async def add_url(
         self, url: str, status: MigrationStatus, m_type: str = "webpage"
@@ -117,22 +188,49 @@ class StateManager:
                 await db.commit()
 
     async def update_status(
-        self, url: str, status: MigrationStatus, error_msg: str | None = None
+        self,
+        url: str,
+        status: MigrationStatus,
+        error_msg: str | None = None,
+        immediate: bool = False,
     ) -> None:
-        """Actualiza el estado de una URL con truncado seguro de errores."""
-        async with self.pool.acquire() as db:
-            if error_msg:
-                # Truncar errores a 500 chars (AGENTS.md requirement)
-                await db.execute(
-                    "UPDATE urls SET status = ?, last_error = ?, last_try = CURRENT_TIMESTAMP WHERE url = ?",
-                    (status.value, error_msg[:500], url),
+        """Actualiza estado de URL con buffering batch opcional.
+        
+        Args:
+            url: URL a actualizar
+            status: Nuevo estado
+            error_msg: Mensaje de error (opcional, se trunca a 500 chars)
+            immediate: Si True, actualiza inmediatamente (para errores críticos)
+        
+        Nota:
+            Por defecto (immediate=False), las actualizaciones se bufferizan
+            y se flushean cada batch_interval segundos o cuando se alcanza
+            batch_size actualizaciones.
+        """
+        if immediate:
+            # Actualización inmediata para casos críticos
+            async with self.pool.acquire() as db:
+                if error_msg:
+                    await db.execute(
+                        "UPDATE urls SET status = ?, last_error = ?, last_try = CURRENT_TIMESTAMP WHERE url = ?",
+                        (status.value, error_msg[:500], url),
+                    )
+                else:
+                    await db.execute(
+                        "UPDATE urls SET status = ?, last_error = NULL, last_try = CURRENT_TIMESTAMP WHERE url = ?",
+                        (status.value, url),
+                    )
+                await db.commit()
+        else:
+            # Buffer para batch processing - orden: (status, error_msg, url)
+            async with self._buffer_lock:
+                self._status_buffer.append(
+                    (status.value, url, error_msg[:500] if error_msg else None)
                 )
-            else:
-                await db.execute(
-                    "UPDATE urls SET status = ?, last_error = NULL, last_try = CURRENT_TIMESTAMP WHERE url = ?",
-                    (status.value, url),
-                )
-            await db.commit()
+            
+            # Flush inmediato si buffer supera threshold
+            if len(self._status_buffer) >= self._batch_size:
+                await self._flush_status_buffer()
 
     async def increment_retry(self, url: str) -> int:
         """Incrementa contador de reintentos y retorna el nuevo valor."""

@@ -136,8 +136,10 @@ async def main_async() -> None:
         timeout=config.db_timeout_seconds
     )
     state = StateManager(
-        pool, 
-        stats_cache_ttl=config.stats_cache_ttl_seconds
+        pool,
+        stats_cache_ttl=config.stats_cache_ttl_seconds,
+        batch_interval=1.0,  # Flush cada 1 segundo
+        batch_size=100,  # O cada 100 actualizaciones
     )
 
     text_extractor = TextExtractor()
@@ -170,6 +172,8 @@ async def main_async() -> None:
     shutdown_monitor = asyncio.create_task(monitor_shutdown())
 
     try:
+        # Iniciar batch processor para actualizaciones de estado
+        await state.start_batch_processor()
         await engine.run()
     except asyncio.CancelledError:
         console.print("[yellow]⚠️  Operation cancelled by user[/]")
@@ -177,6 +181,8 @@ async def main_async() -> None:
         shutdown_monitor.cancel()
         with contextlib.suppress(asyncio.CancelledError):
             await shutdown_monitor
+        # Detener batch processor y flushear pendientes
+        await state.stop_batch_processor()
         await pool.close_all()
 
 

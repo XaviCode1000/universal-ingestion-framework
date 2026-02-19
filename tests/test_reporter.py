@@ -70,13 +70,13 @@ async def test_summary_with_failures(tmp_path):
     
     # Agregar URLs fallidas con errores
     await state.add_url("https://example.com/page1", MigrationStatus.FAILED)
-    await state.update_status("https://example.com/page1", MigrationStatus.FAILED, "Network Error")
-    
+    await state.update_status("https://example.com/page1", MigrationStatus.FAILED, "Network Error", immediate=True)
+
     await state.add_url("https://example.com/page2", MigrationStatus.FAILED)
-    await state.update_status("https://example.com/page2", MigrationStatus.FAILED, "Network Error")
-    
+    await state.update_status("https://example.com/page2", MigrationStatus.FAILED, "Network Error", immediate=True)
+
     await state.add_url("https://example.com/page3", MigrationStatus.FAILED)
-    await state.update_status("https://example.com/page3", MigrationStatus.FAILED, "Timeout")
+    await state.update_status("https://example.com/page3", MigrationStatus.FAILED, "Timeout", immediate=True)
     
     output = StringIO()
     console = Console(file=output, width=80)

@@ -1,3 +1,5 @@
+import asyncio
+
 import pytest
 
 from uif_scraper.db_manager import MigrationStatus, StateManager
@@ -26,6 +28,7 @@ async def test_state_manager_init(tmp_path):
 async def test_state_manager_add_update(tmp_path):
     db_path = tmp_path / "state.db"
     pool = SQLitePool(db_path)
+    # No iniciar batch processor para este test - usar actualizaciones inmediatas
     state = StateManager(pool)
     await state.initialize()
 
@@ -34,7 +37,8 @@ async def test_state_manager_add_update(tmp_path):
     pending = await state.get_pending_urls()
     assert TEST_URL in pending
 
-    await state.update_status(TEST_URL, MigrationStatus.COMPLETED)
+    # Usar immediate=True para evitar buffering
+    await state.update_status(TEST_URL, MigrationStatus.COMPLETED, immediate=True)
     pending = await state.get_pending_urls()
     assert TEST_URL not in pending
 

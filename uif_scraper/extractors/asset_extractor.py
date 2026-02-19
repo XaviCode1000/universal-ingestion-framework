@@ -1,6 +1,7 @@
 from pathlib import Path
 from typing import Any
 
+import aiofiles
 import ftfy
 import yaml
 from markitdown import MarkItDown
@@ -43,14 +44,14 @@ class AssetExtractor(IExtractor):
 
         local_path = folder / filename
 
-        # Stream writing para archivos grandes (>10MB) para evitar picos de memoria
+        # ASYNC FILE I/O: Stream writing para archivos grandes (>10MB)
         if len(content) > self._stream_threshold:
-            with open(local_path, "wb") as f:
+            async with aiofiles.open(local_path, "wb") as f:
                 for i in range(0, len(content), self._chunk_size):
-                    f.write(content[i : i + self._chunk_size])
+                    await f.write(content[i : i + self._chunk_size])
         else:
-            with open(local_path, "wb") as f:
-                f.write(content)
+            async with aiofiles.open(local_path, "wb") as f:
+                await f.write(content)
 
         result: dict[str, Any] = {
             "local_path": str(local_path),
@@ -74,8 +75,9 @@ class AssetExtractor(IExtractor):
                 }
                 frontmatter = yaml.dump(metadata, allow_unicode=True, sort_keys=False)
 
-                with open(md_path, "w", encoding="utf-8") as f_md:
-                    f_md.write(f"---\n{frontmatter}---\n\n{md_content}")
+                # ASYNC FILE I/O para markdown
+                async with aiofiles.open(md_path, "w", encoding="utf-8") as f_md:
+                    await f_md.write(f"---\n{frontmatter}---\n\n{md_content}")
 
                 result["markdown_path"] = str(md_path)
             except Exception as e:
@@ -95,8 +97,9 @@ class AssetExtractor(IExtractor):
                 }
                 frontmatter = yaml.dump(metadata, allow_unicode=True, sort_keys=False)
 
-                with open(md_path, "w", encoding="utf-8") as f_md:
-                    f_md.write(f"---\n{frontmatter}---\n\n{md_content}")
+                # ASYNC FILE I/O para markdown
+                async with aiofiles.open(md_path, "w", encoding="utf-8") as f_md:
+                    await f_md.write(f"---\n{frontmatter}---\n\n{md_content}")
 
                 result["markdown_path"] = str(md_path)
             except Exception as e:
