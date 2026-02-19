@@ -1,5 +1,6 @@
 import asyncio
 import json
+from pathlib import Path
 from typing import Any
 
 import aiofiles
@@ -259,19 +260,31 @@ class UIFMigrationEngine:
                 raw_html = raw_html.decode("utf-8", errors="replace")
 
             clean_html = pre_clean_html(raw_html)
-            metadata_task = asyncio.create_task(
-                self.metadata_extractor.extract(raw_html, url)
-            )
-            text_task = asyncio.create_task(
-                self.text_extractor.extract(clean_html, url)
-            )
-            metadata = await metadata_task
-            text_data = await text_task
+            
+            # Concurrencia estructurada con TaskGroup (Python 3.11+)
+            # Permite cancelación automática si una tarea falla
+            async with asyncio.TaskGroup() as tg:
+                metadata_task = tg.create_task(
+                    self.metadata_extractor.extract(raw_html, url)
+                )
+                text_task = tg.create_task(
+                    self.text_extractor.extract(clean_html, url)
+                )
+            
+            metadata = metadata_task.result()
+            text_data = text_task.result()
 
-            path_slug = slugify(
-                url.replace(self.navigation.base_url, "").replace(".php", "") or "index"
-            )
-            md_path = self.asset_extractor.data_dir / "content" / f"{path_slug}.md"
+            # Construcción robusta del path (Python 3.9+ best practice)
+            # 1. removeprefix es más seguro que replace (solo quita del inicio)
+            rel_path = url.removeprefix(self.navigation.base_url)
+            # 2. Path.stem extrae el nombre sin extensión automáticamente
+            raw_slug = Path(rel_path).stem or "index"
+            # 3. Slugify sanitiza para nombre de archivo seguro
+            path_slug = slugify(raw_slug)
+            # 4. with_suffix maneja la extensión correctamente
+            md_path = (
+                self.asset_extractor.data_dir / "content" / path_slug
+            ).with_suffix(".md")
             md_path.parent.mkdir(parents=True, exist_ok=True)
 
             frontmatter = yaml.dump(metadata, allow_unicode=True, sort_keys=False)
@@ -391,7 +404,21 @@ class UIFMigrationEngine:
         logger.info("Shutdown requested. Workers will finish current tasks...")
 
     async def run(self) -> None:
+        """Ejecuta el scraping con métricas de performance y shutdown adaptativo."""
         await self.setup()
+        
+        # Log de configuración inicial para debugging
+        logger.info(
+            "Starting scraping mission",
+            extra={
+                "url": self.navigation.base_url,
+                "scope": self.navigation.scope.value,
+                "workers": self.config.default_workers,
+                "asset_workers": self.config.asset_workers,
+                "timeout_seconds": self.config.timeout_seconds,
+            },
+        )
+        
         dns_args = []
         if self.config.dns_overrides:
             rules = ", ".join(
@@ -469,21 +496,48 @@ class UIFMigrationEngine:
                     if self.extract_assets:
                         await self.asset_queue.join()
 
+                except* Exception as exc_group:
+                    # Manejo estructurado de excepciones múltiples (Python 3.11+)
+                    for exc in exc_group.exceptions:
+                        logger.error(f"Error en worker: {exc}")
+                        self.circuit_breaker.record_failure(self.navigation.domain)
+                    raise
+
                 finally:
                     # Signal workers to stop
                     self._shutdown_event.set()
+                    
+                    # Timeout adaptativo basado en tareas pendientes
+                    pending_urls = self.url_queue.qsize()
+                    pending_assets = self.asset_queue.qsize()
+                    total_pending = pending_urls + pending_assets
+                    
+                    if total_pending > 0:
+                        # 2 segundos por tarea pendiente, mínimo 30s
+                        per_worker_timeout = max(30.0, total_pending * 2.0)
+                        logger.info(
+                            f"Waiting for {total_pending} pending tasks with {per_worker_timeout}s timeout"
+                        )
+                    else:
+                        per_worker_timeout = 30.0
 
-                    # Wait for workers to finish (with timeout)
+                    # Wait for workers to finish with adaptive timeout
                     if all_workers:
-                        await asyncio.wait(all_workers, timeout=30.0)
-
-                    # Cancel any remaining workers
-                    for w in all_workers:
-                        if not w.done():
-                            w.cancel()
-
-                    # Wait for cancellations to complete
-                    if all_workers:
-                        await asyncio.wait(all_workers, timeout=5.0)
+                        done, pending = await asyncio.wait(
+                            all_workers,
+                            timeout=per_worker_timeout,
+                            return_when=asyncio.ALL_COMPLETED,
+                        )
+                        
+                        # Cancel solo los que realmente están pendientes
+                        if pending:
+                            for w in pending:
+                                logger.warning(
+                                    f"Worker {w.get_name()} did not finish in time, cancelling"
+                                )
+                                w.cancel()
+                            
+                            # Esperar confirmación de cancelación
+                            await asyncio.wait(pending, timeout=5.0)
 
         await self.reporter.generate_summary()

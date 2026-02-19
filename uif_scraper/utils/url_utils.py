@@ -1,5 +1,3 @@
-import re
-import unicodedata
 from urllib.parse import (
     urlparse,
     urlunparse,
@@ -10,13 +8,19 @@ from urllib.parse import (
     quote_plus,
 )
 
+from slugify import slugify as python_slugify
+
 
 def slugify(value: str) -> str:
-    value = (
-        unicodedata.normalize("NFKD", value).encode("ascii", "ignore").decode("ascii")
-    )
-    value = re.sub(r"[^\w\s-]", "", value).strip().lower()
-    return re.sub(r"[-\s]+", "-", value)
+    """Sanitiza string para nombre de archivo seguro.
+    
+    Usa python-slugify para manejo robusto de Unicode y edge cases.
+    Ejemplos:
+        "Español" → "espanol"
+        "Mi Blog" → "mi-blog"
+        "archivo.php" → "archivo-php"
+    """
+    return python_slugify(value)
 
 
 def smart_url_normalize(url: str) -> str:

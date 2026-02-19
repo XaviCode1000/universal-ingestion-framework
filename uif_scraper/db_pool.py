@@ -34,15 +34,36 @@ class SQLitePool:
             self._initialized = True
 
     @asynccontextmanager
-    async def acquire(self) -> AsyncGenerator[aiosqlite.Connection, None]:
+    async def acquire(
+        self, timeout: float | None = None
+    ) -> AsyncGenerator[aiosqlite.Connection, None]:
+        """Adquiere una conexión del pool con timeout configurable.
+        
+        Args:
+            timeout: Tiempo máximo de espera en segundos. Si es None, usa
+                     el timeout por defecto del pool.
+        
+        Raises:
+            TimeoutError: Si no se puede adquirir una conexión en el tiempo
+                         especificado.
+        """
         if not self._initialized:
             await self.initialize()
 
-        conn = await self._pool.get()
+        effective_timeout = timeout if timeout is not None else self.timeout
+        
         try:
-            yield conn
-        finally:
-            await self._pool.put(conn)
+            conn = await asyncio.wait_for(self._pool.get(), timeout=effective_timeout)
+            try:
+                yield conn
+            finally:
+                await self._pool.put(conn)
+        except asyncio.TimeoutError:
+            raise TimeoutError(
+                f"Could not acquire DB connection within {effective_timeout}s. "
+                f"Pool size: {self.max_size}, consider increasing it or check for "
+                f"long-running queries that may be holding connections."
+            )
 
     async def close_all(self) -> None:
         async with self._lock:

@@ -10,7 +10,7 @@ import questionary
 from questionary import Choice
 from rich.console import Console
 
-from uif_scraper.config import ScraperConfig, load_config_with_overrides, run_wizard
+from uif_scraper.config import load_config_with_overrides, run_wizard
 from uif_scraper.db_manager import StateManager
 from uif_scraper.db_pool import SQLitePool
 from uif_scraper.engine import UIFMigrationEngine
@@ -130,8 +130,15 @@ async def main_async() -> None:
     project_data_dir.mkdir(parents=True, exist_ok=True)
 
     db_path = project_data_dir / "state.db"
-    pool = SQLitePool(db_path, max_size=5)
-    state = StateManager(pool)
+    pool = SQLitePool(
+        db_path, 
+        max_size=config.db_pool_size, 
+        timeout=config.db_timeout_seconds
+    )
+    state = StateManager(
+        pool, 
+        stats_cache_ttl=config.stats_cache_ttl_seconds
+    )
 
     text_extractor = TextExtractor()
     metadata_extractor = MetadataExtractor()

@@ -26,6 +26,9 @@ class ScraperConfig(BaseModel):
     dns_overrides: dict[str, str] = Field(default_factory=dict)
     log_rotation_mb: int = 50
     log_level: str = "INFO"
+    db_pool_size: int = 5
+    db_timeout_seconds: float = 5.0
+    stats_cache_ttl_seconds: float = 5.0
 
     @field_validator("data_dir", "cache_dir", mode="before")
     @classmethod

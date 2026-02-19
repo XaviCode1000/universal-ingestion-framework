@@ -1,17 +1,38 @@
+from typing import Any, Protocol
 from urllib.parse import urljoin, urlparse
-from typing import Any
 
 from uif_scraper.models import ScrapingScope
 
 
+class HTMLParserLike(Protocol):
+    """Protocolo para parsers HTML con método css()."""
+
+    def css(self, selector: str) -> Any:
+        """Selecciona elementos del DOM usando CSS selectors."""
+        ...
+
+
 class NavigationService:
+    """Servicio de navegación y control de scope para web scraping."""
+
     def __init__(self, base_url: str, scope: ScrapingScope = ScrapingScope.SMART):
         self.base_url = base_url
         self.domain = urlparse(base_url).netloc
         self.scope = scope
 
     def is_asset(self, url: str) -> bool:
-        asset_extensions = [".pdf", ".jpg", ".png", ".jpeg", ".gif", ".svg", ".webp"]
+        asset_extensions = [
+            ".pdf",
+            ".jpg",
+            ".png",
+            ".jpeg",
+            ".gif",
+            ".svg",
+            ".webp",
+            ".md",  # Markdown files are assets, not webpages
+            ".txt",  # Text files
+            ".csv",  # Data files
+        ]
         return any(url.lower().endswith(ext) for ext in asset_extensions)
 
     def is_noise(self, url: str) -> bool:
@@ -28,31 +49,39 @@ class NavigationService:
         if self.scope == ScrapingScope.BROAD:
             return True
 
-        # 3. Normalización de base_url para comparaciones de prefijo
-        # Aseguramos que termine en / si tiene path para evitar emparejamientos parciales (ej: /docs vs /docs-old)
-        base_path = urlparse(self.base_url).path
-        normalized_base = (
-            self.base_url
-            if base_path.endswith("/") or not base_path
-            else f"{self.base_url}/"
-        )
-
-        # 4. Strict Scope: Solo subrutas exactas de la semilla
+        # 3. Strict Scope: Solo subrutas exactas de la semilla
+        # Usa removeprefix para verificar pertenencia de forma segura
         if self.scope == ScrapingScope.STRICT:
-            return full_url.startswith(normalized_base) or full_url == self.base_url
+            return (
+                full_url == self.base_url
+                or full_url.removeprefix(self.base_url).startswith("/")
+            )
 
-        # 5. Smart Scope: Lógica de subdirectorio inteligente
-        # Si la semilla es una raíz (ej: domain.com/), se comporta como Broad.
+        # 4. Smart Scope: Lógica de subdirectorio inteligente
+        # Si la semilla es raíz (ej: domain.com/), se comporta como Broad.
         # Si tiene subdirectorio (ej: domain.com/blog), se comporta como Strict.
+        base_path = urlparse(self.base_url).path
         path_parts = [p for p in base_path.strip("/").split("/") if p]
         if not path_parts:
             return True  # Es raíz del dominio
 
-        return full_url.startswith(normalized_base) or full_url == self.base_url
+        return (
+            full_url == self.base_url
+            or full_url.removeprefix(self.base_url).startswith("/")
+        )
 
     def extract_links(
-        self, html_parser: Any, current_url: str
+        self, html_parser: HTMLParserLike, current_url: str
     ) -> tuple[list[str], list[str]]:
+        """Extrae links y assets de una página HTML.
+        
+        Args:
+            html_parser: Parser HTML con método css() (selectolax, scrapling, etc.)
+            current_url: URL actual para resolver links relativos.
+        
+        Returns:
+            Tupla (nuevas_paginas, nuevos_assets) sin duplicados.
+        """
         links = [str(node) for node in html_parser.css("a::attr(href)")]
         images = [str(node) for node in html_parser.css("img::attr(src)")]
 

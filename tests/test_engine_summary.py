@@ -22,11 +22,12 @@ async def test_engine_generate_summary(tmp_path):
     await state.initialize()
 
     async with pool.acquire() as db:
+        # Insertar con la nueva columna discovered_at (agregada en refactorización)
         await db.execute(
-            "INSERT INTO urls VALUES ('u1', 'completed', 'webpage', 0, NULL, CURRENT_TIMESTAMP)"
+            "INSERT INTO urls (url, status, type, retries, last_error, discovered_at) VALUES ('u1', 'completed', 'webpage', 0, NULL, CURRENT_TIMESTAMP)"
         )
         await db.execute(
-            "INSERT INTO urls VALUES ('u2', 'failed', 'webpage', 1, 'Network Error', CURRENT_TIMESTAMP)"
+            "INSERT INTO urls (url, status, type, retries, last_error, discovered_at) VALUES ('u2', 'failed', 'webpage', 1, 'Network Error', CURRENT_TIMESTAMP)"
         )
         await db.commit()
 
