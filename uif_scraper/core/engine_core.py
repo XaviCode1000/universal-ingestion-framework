@@ -40,6 +40,7 @@ from uif_scraper.utils.circuit_breaker import CircuitBreaker
 from uif_scraper.utils.compression import write_compressed_markdown
 from uif_scraper.utils.html_cleaner import pre_clean_html
 from uif_scraper.utils.http_session import HTTPSessionCache
+from uif_scraper.utils.markdown_utils import enhance_markdown_for_rag
 from uif_scraper.utils.url_utils import slugify, smart_url_normalize
 
 
@@ -661,6 +662,10 @@ class EngineCore:
     ) -> Path:
         """Save markdown with frontmatter and compression.
 
+        Applies RAG enhancements before saving:
+        1. TOC generation from headers
+        2. Relative URL resolution
+
         Args:
             url: The page URL (used to generate filename)
             metadata: Page metadata for YAML frontmatter
@@ -674,6 +679,15 @@ class EngineCore:
         raw_slug = Path(rel_path).stem or "index"
         path_slug = slugify(raw_slug)
 
+        # Enhance markdown for RAG (TOC + absolute links)
+        enhanced_markdown = enhance_markdown_for_rag(
+            markdown=markdown,
+            metadata=metadata,
+            base_url=url,
+            toc_max_level=3,
+            include_toc=True,
+        )
+
         # Filter metadata for clean frontmatter (RAG-friendly)
         frontmatter_metadata = filter_metadata_for_frontmatter(metadata)
 
@@ -681,7 +695,7 @@ class EngineCore:
         frontmatter = yaml.dump(
             frontmatter_metadata, allow_unicode=True, sort_keys=False
         )
-        content = f"---\n{frontmatter}---\n\n{markdown}"
+        content = f"---\n{frontmatter}---\n\n{enhanced_markdown}"
 
         # Ensure directory exists before writing
         content_dir = self.asset_extractor.data_dir / "content"
