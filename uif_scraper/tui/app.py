@@ -1,7 +1,11 @@
 """UIF Dashboard App - Main Textual Application.
 
-This app controls the event loop and runs the scraping engine
-as a background worker using Textual's worker system.
+This app runs the scraping engine (EngineCore) as a background worker
+using Textual's worker system. UI updates are received via TextualUICallback
+which translates EngineCore events to Textual messages.
+
+Architecture:
+    EngineCore → TextualUICallback → Messages → UIFDashboardApp → Widgets
 """
 
 from pathlib import Path
@@ -12,7 +16,7 @@ from textual.app import App, ComposeResult
 from textual.containers import Container, Horizontal
 from textual.message import Message
 from textual.widgets import Footer, Header
-from textual.worker import Worker, WorkerState
+from textual.worker import Worker
 
 from uif_scraper.tui.widgets.activity import ActivityPanel
 from uif_scraper.tui.widgets.header import MissionHeader

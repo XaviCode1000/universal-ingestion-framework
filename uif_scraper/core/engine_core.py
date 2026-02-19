@@ -1,10 +1,7 @@
-"""Core engine logic shared between UI implementations.
+"""Core engine logic for UIF Migration Engine.
 
-This module extracts the common scraping logic from engine.py and engine_v2.py,
-eliminating ~80% code duplication. UI implementations only need to:
-1. Create an EngineCore instance
-2. Subscribe to updates via callbacks
-3. Call run() and handle shutdown
+This module contains the complete scraping business logic.
+UI implementations subscribe via UICallback interface.
 
 Reference: AGENTS.md - SRP (Single Responsibility Principle)
 """
@@ -29,10 +26,6 @@ from uif_scraper.core.constants import (
     MAX_CIRCUIT_BREAKER_BACKOFF_SECONDS,
     MIN_SHUTDOWN_TIMEOUT_SECONDS,
 )
-
-# Sentinel object to signal workers to stop
-# Using a unique object ensures no collision with actual data
-_STOP_SENTINEL = object()
 from uif_scraper.core.types import ActivityEntry, DashboardState, EngineStats
 from uif_scraper.db_manager import StateManager
 from uif_scraper.extractors.asset_extractor import AssetExtractor
@@ -46,6 +39,10 @@ from uif_scraper.utils.compression import write_compressed_markdown
 from uif_scraper.utils.html_cleaner import pre_clean_html
 from uif_scraper.utils.http_session import HTTPSessionCache
 from uif_scraper.utils.url_utils import slugify, smart_url_normalize
+
+# Sentinel object to signal workers to stop
+# Using a unique object ensures no collision with actual data
+_STOP_SENTINEL = object()
 
 if TYPE_CHECKING:
     pass
@@ -82,15 +79,14 @@ class UICallback(ABC):
 class EngineCore:
     """Core scraping engine - UI-agnostic business logic.
 
-    This class contains all the scraping logic extracted from engine.py/engine_v2.py.
-    UI implementations should:
+    This class contains all the scraping logic. UI implementations should:
     1. Create EngineCore with dependencies
-    2. Set ui_callback for updates
+    2. Set ui_callback for event-driven updates
     3. Call run() to start scraping
 
     Example:
         core = EngineCore(config, state, extractors, ...)
-        core.ui_callback = MyRichUI()
+        core.ui_callback = MyUICallback()
         await core.run()
     """
 

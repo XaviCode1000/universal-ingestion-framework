@@ -11,9 +11,9 @@ from questionary import Choice
 from rich.console import Console
 
 from uif_scraper.config import load_config_with_overrides, run_wizard
+from uif_scraper.core.engine_core import EngineCore
 from uif_scraper.db_manager import StateManager
 from uif_scraper.db_pool import SQLitePool
-from uif_scraper.engine_v2 import UIFMigrationEngineV2
 from uif_scraper.extractors.asset_extractor import AssetExtractor
 from uif_scraper.extractors.metadata_extractor import MetadataExtractor
 from uif_scraper.extractors.text_extractor import TextExtractor
@@ -21,6 +21,7 @@ from uif_scraper.logger import setup_logger
 from uif_scraper.models import ScrapingScope
 from uif_scraper.navigation import NavigationService
 from uif_scraper.reporter import ReporterService
+from uif_scraper.tui.textual_callback import TextualUICallback
 from uif_scraper.utils.url_utils import slugify
 
 # Catppuccin-themed console
@@ -184,15 +185,15 @@ async def _run_async(
     navigation_service = NavigationService(mission_url, ScrapingScope(mission_scope))
     reporter_service = ReporterService(console, state)
 
-    # Create the TUI app first (without engine reference)
+    # Create the TUI app first
     tui_app = UIFDashboardApp(
         mission_url=mission_url,
         scope=mission_scope,
         worker_count=config.default_workers,
     )
 
-    # Create engine with TUI app reference
-    engine = UIFMigrationEngineV2(
+    # Create EngineCore directly with all dependencies
+    core = EngineCore(
         config=config,
         state=state,
         text_extractor=text_extractor,
@@ -201,11 +202,13 @@ async def _run_async(
         navigation_service=navigation_service,
         reporter_service=reporter_service,
         extract_assets=mission_extract_assets,
-        tui_app=tui_app,
     )
 
-    # Set the engine factory to run as background worker
-    tui_app._engine_factory = engine.run  # type: ignore[assignment]
+    # Set up UI callback for event-driven updates
+    core.ui_callback = TextualUICallback(tui_app)
+
+    # Pass core.run as the engine factory
+    tui_app._engine_factory = core.run
 
     try:
         await state.start_batch_processor()
