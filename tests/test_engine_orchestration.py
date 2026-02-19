@@ -67,7 +67,7 @@ async def test_engine_run_orchestration(tmp_path):
     core._page_worker = AsyncMock()
     core._asset_worker = AsyncMock()
 
-    with patch("uif_scraper.engine.AsyncStealthySession") as mock_session:
+    with patch("uif_scraper.core.engine_core.AsyncStealthySession") as mock_session:
         session_instance = AsyncMock()
         mock_session.return_value.__aenter__.return_value = session_instance
         await core.run()
