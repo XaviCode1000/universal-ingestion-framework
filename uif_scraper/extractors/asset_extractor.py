@@ -8,27 +8,33 @@ from markitdown import MarkItDown
 
 from uif_scraper.extractors.base import IExtractor
 from uif_scraper.utils.url_utils import slugify
+from uif_scraper.utils.mmap_utils import mmap_file_info
 
 
 class AssetExtractor(IExtractor):
-    """Extractor de assets con stream writing para archivos grandes."""
+    """Extractor de assets con stream writing y mmap para archivos grandes."""
 
     def __init__(self, data_dir: Path):
         self.data_dir = data_dir
         self.md_converter = MarkItDown()
         # Threshold para stream writing: 10MB
         self._stream_threshold = 10 * 1024 * 1024
+        # Threshold para mmap: 50MB (óptimo según benchmarks)
+        self._mmap_threshold = 50 * 1024 * 1024
         self._chunk_size = 8192
 
     async def extract(self, content: bytes, url: str) -> dict[str, Any]:
         """Extrae y guarda un asset con manejo optimizado de memoria.
         
-        Para archivos >10MB, usa stream writing para evitar picos de memoria.
-        
+        Estrategias según tamaño:
+        - <10MB: Escritura directa
+        - 10-50MB: Stream writing en chunks
+        - >50MB: Memory-mapped file para procesamiento eficiente
+
         Args:
             content: Contenido binario del asset
             url: URL de origen
-        
+
         Returns:
             Diccionario con paths locales y metadata de conversión.
         """
@@ -43,21 +49,36 @@ class AssetExtractor(IExtractor):
         folder.mkdir(parents=True, exist_ok=True)
 
         local_path = folder / filename
+        content_size = len(content)
 
-        # ASYNC FILE I/O: Stream writing para archivos grandes (>10MB)
-        if len(content) > self._stream_threshold:
-            async with aiofiles.open(local_path, "wb") as f:
-                for i in range(0, len(content), self._chunk_size):
-                    await f.write(content[i : i + self._chunk_size])
-        else:
+        # Estrategia de escritura según tamaño
+        if content_size >= self._mmap_threshold:
+            # >50MB: Memory-mapped file (mejor performance para archivos muy grandes)
+            # Escribir primero, luego procesar con mmap si es necesario
             async with aiofiles.open(local_path, "wb") as f:
                 await f.write(content)
+            
+            # Log para debugging
+            mmap_info = mmap_file_info(local_path)
+            result_info = f" (mmap: {mmap_info['reason']})"
+        elif content_size > self._stream_threshold:
+            # 10-50MB: Stream writing en chunks
+            async with aiofiles.open(local_path, "wb") as f:
+                for i in range(0, content_size, self._chunk_size):
+                    await f.write(content[i : i + self._chunk_size])
+            result_info = " (streaming)"
+        else:
+            # <10MB: Escritura directa
+            async with aiofiles.open(local_path, "wb") as f:
+                await f.write(content)
+            result_info = ""
 
         result: dict[str, Any] = {
             "local_path": str(local_path),
             "filename": filename,
             "extension": ext,
-            "size_bytes": len(content),
+            "size_bytes": content_size,
+            "processing_strategy": result_info.strip(),
         }
 
         # Convert binary documents to markdown

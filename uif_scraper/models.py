@@ -43,8 +43,13 @@ class WebPageInput(BaseModel):
     @field_validator("content_md_path")
     @classmethod
     def validate_path(cls, value: str) -> str:
-        if not value.endswith(".md"):
-            msg = "Path inválido: debe terminar en .md"
+        """Valida que el path termine en .md o .md comprimido (.md.zst, .md.gz)."""
+        if not (
+            value.endswith(".md")
+            or value.endswith(".md.zst")
+            or value.endswith(".md.gz")
+        ):
+            msg = "Path inválido: debe terminar en .md, .md.zst o .md.gz"
             raise ValueError(msg)
         return value
 

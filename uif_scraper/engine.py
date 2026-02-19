@@ -167,6 +167,26 @@ class UIFMigrationEngine:
             async with aiofiles.open(report_path, "a", encoding="utf-8") as f:
                 await f.write(json.dumps(data.model_dump(mode="json")) + "\n")
 
+    async def _update_seen_sets(
+        self, pages: list[str], assets: list[str]
+    ) -> None:
+        """Actualiza sets de URLs vistas (operación thread-safe)."""
+        for p in pages:
+            self.seen_urls.add(p)
+        for a in assets:
+            self.seen_assets.add(a)
+
+    async def _parallel_enqueue(
+        self, pages: list[str], assets: list[str]
+    ) -> None:
+        """Encola URLs en paralelo usando gather para mejor performance."""
+        # Encolar páginas y assets concurrentemente
+        await asyncio.gather(
+            *[self.url_queue.put(p) for p in pages],
+            *[self.asset_queue.put(a) for a in assets],
+            return_exceptions=True,  # Continuar incluso si alguna falla
+        )
+
     async def setup(self) -> None:
         await self.state.initialize()
         async with self.state.pool.acquire() as db:
@@ -312,25 +332,24 @@ class UIFMigrationEngine:
             ]
             new_pages_filtered = [p for p in new_pages if p not in self.seen_urls]
 
-            for a in new_assets_filtered:
-                self.seen_assets.add(a)
-            for p in new_pages_filtered:
-                self.seen_urls.add(p)
+            # PARALLEL BATCH PROCESSING: Ejecutar operaciones independientes en paralelo
+            async with asyncio.TaskGroup() as tg:
+                # Task 1: Actualizar sets de vistos
+                tg.create_task(self._update_seen_sets(new_pages_filtered, new_assets_filtered))
+                
+                # Task 2: Guardar URLs en DB (batch)
+                assets_to_add = [
+                    (a, MigrationStatus.PENDING, "asset") for a in new_assets_filtered
+                ]
+                pages_to_add = [
+                    (p, MigrationStatus.PENDING, "webpage") for p in new_pages_filtered
+                ]
+                tg.create_task(self.state.add_urls_batch(assets_to_add + pages_to_add))
+                
+                # Task 3: Encolar para procesamiento (parallel enqueue)
+                tg.create_task(self._parallel_enqueue(new_pages_filtered, new_assets_filtered))
 
-            assets_to_add = [
-                (a, MigrationStatus.PENDING, "asset") for a in new_assets_filtered
-            ]
-            pages_to_add = [
-                (p, MigrationStatus.PENDING, "webpage") for p in new_pages_filtered
-            ]
-            await self.state.add_urls_batch(assets_to_add + pages_to_add)
-
-            for a in new_assets_filtered:
-                await self.asset_queue.put(a)
-            for p in new_pages_filtered:
-                await self.url_queue.put(p)
-
-            await self.state.update_status(url, MigrationStatus.COMPLETED)
+            await self.state.update_status(url, MigrationStatus.COMPLETED, immediate=False)
             self.pages_completed += 1
 
             if self.progress:
