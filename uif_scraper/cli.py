@@ -95,6 +95,12 @@ async def main_async() -> None:
     )
     parser.add_argument("--workers", type=int, help="Número de workers concurrentes")
     parser.add_argument("--only-text", action="store_true", help="No descargar assets")
+    parser.add_argument(
+        "--output-dir",
+        "-d",
+        type=Path,
+        help="Directorio de salida para los datos (por defecto: ./data)",
+    )
 
     args = parser.parse_args()
 
@@ -119,6 +125,10 @@ async def main_async() -> None:
     if args.workers:
         config.default_workers = args.workers
 
+    # Directorio de salida (CLI override > config > default)
+    if args.output_dir:
+        config.data_dir = args.output_dir
+
     # Resolver data_dir relativo al directorio actual de ejecución si no es absoluto
     if not config.data_dir.is_absolute():
         config.data_dir = Path.cwd() / "data"
@@ -131,9 +141,7 @@ async def main_async() -> None:
 
     db_path = project_data_dir / "state.db"
     pool = SQLitePool(
-        db_path, 
-        max_size=config.db_pool_size, 
-        timeout=config.db_timeout_seconds
+        db_path, max_size=config.db_pool_size, timeout=config.db_timeout_seconds
     )
     state = StateManager(
         pool,
@@ -143,7 +151,9 @@ async def main_async() -> None:
     )
 
     text_extractor = TextExtractor()
-    metadata_extractor = MetadataExtractor(cache_size=1000)  # LRU cache para contenido repetido
+    metadata_extractor = MetadataExtractor(
+        cache_size=1000
+    )  # LRU cache para contenido repetido
     asset_extractor = AssetExtractor(project_data_dir)
 
     navigation_service = NavigationService(mission_url, ScrapingScope(mission_scope))
