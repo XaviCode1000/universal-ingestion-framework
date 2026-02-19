@@ -4,9 +4,9 @@ import asyncio
 import pytest
 
 from uif_scraper.config import ScraperConfig
+from uif_scraper.core.engine_core import EngineCore
 from uif_scraper.db_manager import StateManager
 from uif_scraper.db_pool import SQLitePool
-from uif_scraper.engine import UIFMigrationEngine
 from uif_scraper.models import MigrationStatus, ScrapingScope
 from uif_scraper.extractors.asset_extractor import AssetExtractor
 from uif_scraper.extractors.metadata_extractor import MetadataExtractor
@@ -34,7 +34,7 @@ async def test_engine_process_page_full(tmp_path):
     nav = NavigationService(TEST_URL, scope=ScrapingScope.BROAD)
     rep = ReporterService(MagicMock(), state)
 
-    engine = UIFMigrationEngine(
+    core = EngineCore(
         config=config,
         state=state,
         text_extractor=text_extractor,
@@ -63,10 +63,9 @@ async def test_engine_process_page_full(tmp_path):
     ) as mock_get:
         mock_get.return_value = mock_resp
         session = AsyncMock()
-        # process_page is now in _core
-        await engine._core._process_page(session, TEST_URL)  # noqa: SLF001
-        assert "https://webscraper.io/other" in engine._core.seen_urls  # noqa: SLF001
-        assert "https://webscraper.io/img.png" in engine._core.seen_assets  # noqa: SLF001
+        await core._process_page(session, TEST_URL)
+        assert "https://webscraper.io/other" in core.seen_urls
+        assert "https://webscraper.io/img.png" in core.seen_assets
 
         # Esperar que el batch processor flushee las actualizaciones de estado
         await asyncio.sleep(1.1)

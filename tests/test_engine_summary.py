@@ -3,9 +3,9 @@ from unittest.mock import MagicMock
 import pytest
 
 from uif_scraper.config import ScraperConfig
+from uif_scraper.core.engine_core import EngineCore
 from uif_scraper.db_manager import StateManager
 from uif_scraper.db_pool import SQLitePool
-from uif_scraper.engine import UIFMigrationEngine
 from uif_scraper.navigation import NavigationService
 from uif_scraper.reporter import ReporterService
 
@@ -34,7 +34,7 @@ async def test_engine_generate_summary(tmp_path):
     nav = NavigationService(TEST_URL)
     rep = ReporterService(MagicMock(), state)
 
-    _ = UIFMigrationEngine(
+    _ = EngineCore(
         config=config,
         state=state,
         text_extractor=MagicMock(),

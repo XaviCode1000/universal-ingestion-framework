@@ -3,9 +3,9 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from uif_scraper.config import ScraperConfig
+from uif_scraper.core.engine_core import EngineCore
 from uif_scraper.db_manager import MigrationStatus, StateManager
 from uif_scraper.db_pool import SQLitePool
-from uif_scraper.engine import UIFMigrationEngine
 from uif_scraper.navigation import NavigationService
 from uif_scraper.reporter import ReporterService
 
@@ -26,7 +26,7 @@ async def test_engine_setup_loads_state(tmp_path):
     nav = NavigationService(TEST_URL)
     rep = ReporterService(MagicMock(), state)
 
-    engine = UIFMigrationEngine(
+    core = EngineCore(
         config=config,
         state=state,
         text_extractor=MagicMock(),
@@ -36,10 +36,10 @@ async def test_engine_setup_loads_state(tmp_path):
         reporter_service=rep,
     )
 
-    await engine.setup()
-    assert f"{TEST_URL}/seen" in engine.seen_urls
-    assert engine.pages_completed == 1
-    assert engine.url_queue.qsize() == 1
+    await core.setup()
+    assert f"{TEST_URL}/seen" in core.seen_urls
+    assert core.pages_completed == 1
+    assert core.url_queue.qsize() == 1
     await pool.close_all()
 
 
@@ -54,7 +54,7 @@ async def test_engine_download_asset(tmp_path):
     nav = NavigationService(TEST_URL)
     rep = ReporterService(MagicMock(), state)
 
-    engine = UIFMigrationEngine(
+    core = EngineCore(
         config=config,
         state=state,
         text_extractor=MagicMock(),
@@ -72,8 +72,8 @@ async def test_engine_download_asset(tmp_path):
         "scrapling.fetchers.AsyncFetcher.get", new_callable=AsyncMock
     ) as mock_get:
         mock_get.return_value = mock_resp
-        await engine.download_asset(f"{TEST_URL}/img.png")
+        await core._download_asset(f"{TEST_URL}/img.png")
         asset_extractor.extract.assert_called_once()
-        assert engine.assets_completed == 1
+        assert core.assets_completed == 1
 
     await pool.close_all()

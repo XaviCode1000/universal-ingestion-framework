@@ -3,9 +3,9 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from uif_scraper.config import ScraperConfig
+from uif_scraper.core.engine_core import EngineCore
 from uif_scraper.db_manager import StateManager
 from uif_scraper.db_pool import SQLitePool
-from uif_scraper.engine import UIFMigrationEngine
 from uif_scraper.navigation import NavigationService
 from uif_scraper.reporter import ReporterService
 
@@ -23,7 +23,7 @@ async def test_engine_retry_logic(tmp_path):
     nav = NavigationService(TEST_URL)
     rep = ReporterService(MagicMock(), state)
 
-    engine = UIFMigrationEngine(
+    core = EngineCore(
         config=config,
         state=state,
         text_extractor=MagicMock(),
@@ -37,9 +37,9 @@ async def test_engine_retry_logic(tmp_path):
         "scrapling.fetchers.AsyncFetcher.get", side_effect=Exception("Network fail")
     ):
         session = AsyncMock()
-        await engine.process_page(session, TEST_URL)
+        await core._process_page(session, TEST_URL)
         assert state.increment_retry.call_count == 1
-        assert engine.url_queue.qsize() == 1
+        assert core.url_queue.qsize() == 1
 
 
 @pytest.mark.asyncio
@@ -52,7 +52,7 @@ async def test_engine_run_orchestration(tmp_path):
     nav = NavigationService(TEST_URL)
     rep = ReporterService(MagicMock(), state)
 
-    engine = UIFMigrationEngine(
+    core = EngineCore(
         config=config,
         state=state,
         text_extractor=MagicMock(),
@@ -62,16 +62,16 @@ async def test_engine_run_orchestration(tmp_path):
         reporter_service=rep,
     )
 
-    engine.setup = AsyncMock()
+    core.setup = AsyncMock()
     # Mock workers para evitar deadlock en colas vacías
-    engine.page_worker = AsyncMock()
-    engine.asset_worker = AsyncMock()
+    core._page_worker = AsyncMock()
+    core._asset_worker = AsyncMock()
 
     with patch("uif_scraper.engine.AsyncStealthySession") as mock_session:
         session_instance = AsyncMock()
         mock_session.return_value.__aenter__.return_value = session_instance
-        await engine.run()
-        engine.setup.assert_called_once()
+        await core.run()
+        core.setup.assert_called_once()
         # Verificar que se crearon los workers
-        assert engine.page_worker.call_count == 2  # default_workers=2
+        assert core._page_worker.call_count == 2  # default_workers=2
     await pool.close_all()

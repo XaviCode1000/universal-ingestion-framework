@@ -22,9 +22,9 @@ from unittest.mock import MagicMock
 import pytest
 
 from uif_scraper.config import ScraperConfig
+from uif_scraper.core.engine_core import EngineCore
 from uif_scraper.db_manager import StateManager
 from uif_scraper.db_pool import SQLitePool
-from uif_scraper.engine import UIFMigrationEngine
 from uif_scraper.navigation import NavigationService
 from uif_scraper.reporter import ReporterService
 from uif_scraper.models import ScrapingScope
@@ -68,7 +68,7 @@ async def test_browser_scrape_single_page(tmp_path):
     from uif_scraper.extractors.metadata_extractor import MetadataExtractor
     from uif_scraper.extractors.asset_extractor import AssetExtractor
 
-    engine = UIFMigrationEngine(
+    core = EngineCore(
         config=config,
         state=state,
         text_extractor=TextExtractor(),
@@ -79,11 +79,11 @@ async def test_browser_scrape_single_page(tmp_path):
         extract_assets=False,
     )
 
-    await engine.setup()
+    await core.setup()
 
     # Verificar que la URL está en la cola
-    assert not engine.url_queue.empty()
-    assert TEST_URL_PRODUCT in engine.seen_urls
+    assert not core.url_queue.empty()
+    assert TEST_URL_PRODUCT in core.seen_urls
 
     # Crear sesión stealth con navegador real
     from scrapling.fetchers import AsyncStealthySession
@@ -95,9 +95,9 @@ async def test_browser_scrape_single_page(tmp_path):
         additional_args={"args": ["--disable-gpu", "--no-sandbox"]},
     ) as session:
         # Procesar la página
-        url = await engine.url_queue.get()
-        await engine.process_page(session, url)
-        engine.url_queue.task_done()
+        url = await core.url_queue.get()
+        await core._process_page(session, url)
+        core.url_queue.task_done()
 
     # Esperar que el batch processor flushee las actualizaciones de estado
     await asyncio.sleep(1.1)
@@ -206,7 +206,7 @@ async def test_browser_full_mission_mini(tmp_path):
     from uif_scraper.extractors.metadata_extractor import MetadataExtractor
     from uif_scraper.extractors.asset_extractor import AssetExtractor
 
-    engine = UIFMigrationEngine(
+    core = EngineCore(
         config=config,
         state=state,
         text_extractor=TextExtractor(),
@@ -219,17 +219,17 @@ async def test_browser_full_mission_mini(tmp_path):
 
     # Ejecutar con timeout de 90 segundos
     async def run_with_timeout():
-        await asyncio.wait_for(engine.run(), timeout=90.0)
+        await asyncio.wait_for(core.run(), timeout=90.0)
 
     try:
         await run_with_timeout()
     except asyncio.TimeoutError:
         # Si timeout, requestar shutdown
-        engine.request_shutdown()
+        core.request_shutdown()
         await asyncio.sleep(2)
 
     # Verificar que al menos 1 página se procesó
-    assert engine.pages_completed >= 0, "Debería haber páginas completadas"
+    assert core.pages_completed >= 0, "Debería haber páginas completadas"
 
     # Verificar DB
     async with pool.acquire() as db:

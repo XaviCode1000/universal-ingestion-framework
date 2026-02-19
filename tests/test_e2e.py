@@ -20,9 +20,9 @@ from pathlib import Path
 from unittest.mock import MagicMock, AsyncMock, patch
 
 from uif_scraper.config import ScraperConfig
+from uif_scraper.core.engine_core import EngineCore
 from uif_scraper.db_manager import StateManager, MigrationStatus
 from uif_scraper.db_pool import SQLitePool
-from uif_scraper.engine import UIFMigrationEngine
 from uif_scraper.navigation import NavigationService
 from uif_scraper.reporter import ReporterService
 from uif_scraper.models import ScrapingScope
@@ -54,15 +54,15 @@ async def test_e2e_http_fetch_single_page(tmp_path):
     pool = SQLitePool(db_path)
     state = StateManager(pool)
     await state.initialize()
-    
+
     nav = NavigationService(TEST_URL_PRODUCT, scope=ScrapingScope.STRICT)
     rep = ReporterService(MagicMock(), state)
-    
+
     from uif_scraper.extractors.text_extractor import TextExtractor
     from uif_scraper.extractors.metadata_extractor import MetadataExtractor
     from uif_scraper.extractors.asset_extractor import AssetExtractor
-    
-    engine = UIFMigrationEngine(
+
+    core = EngineCore(
         config=config,
         state=state,
         text_extractor=TextExtractor(),
@@ -72,30 +72,30 @@ async def test_e2e_http_fetch_single_page(tmp_path):
         reporter_service=rep,
         extract_assets=False,
     )
-    
-    await engine.setup()
-    
+
+    await core.setup()
+
     # Verificar que la URL está en la cola
-    assert not engine.url_queue.empty()
-    
+    assert not core.url_queue.empty()
+
     # Usar AsyncFetcher directamente (sin browser)
     from scrapling.fetchers import AsyncFetcher
-    
+
     async with AsyncStealthySessionMock() as session:
-        url = await engine.url_queue.get()
-        
+        url = await core.url_queue.get()
+
         # Fetch real con AsyncFetcher
         response = await AsyncFetcher.get(
             url,
             impersonate="chrome",
             timeout=config.timeout_seconds,
         )
-        
+
         # Simular que el response viene del session mock
         session.fetch_result = response
-        
-        await engine.process_page(session, url)
-        engine.url_queue.task_done()
+
+        await core._process_page(session, url)
+        core.url_queue.task_done()
 
     # Esperar que el batch processor flushee las actualizaciones de estado
     # El batch processor tiene batch_interval=1.0s por defecto
@@ -237,8 +237,8 @@ async def test_e2e_full_flow_mocked_browser(tmp_path):
     from uif_scraper.extractors.text_extractor import TextExtractor
     from uif_scraper.extractors.metadata_extractor import MetadataExtractor
     from uif_scraper.extractors.asset_extractor import AssetExtractor
-    
-    engine = UIFMigrationEngine(
+
+    core = EngineCore(
         config=config,
         state=state,
         text_extractor=TextExtractor(),
@@ -248,17 +248,17 @@ async def test_e2e_full_flow_mocked_browser(tmp_path):
         reporter_service=rep,
         extract_assets=False,
     )
-    
-    await engine.setup()
-    
+
+    await core.setup()
+
     # Mockear AsyncStealthySession pero usar AsyncFetcher real
     class PartialMockSession:
         async def __aenter__(self):
             return self
-        
+
         async def __aexit__(self, *args):
             pass
-        
+
         async def fetch(self, url, timeout=45000):
             from scrapling.fetchers import AsyncFetcher
             return await AsyncFetcher.get(
@@ -266,13 +266,13 @@ async def test_e2e_full_flow_mocked_browser(tmp_path):
                 impersonate="chrome",
                 timeout=timeout / 1000 if timeout > 1000 else timeout,
             )
-    
+
     # Procesar página
-    url = await engine.url_queue.get()
-    
+    url = await core.url_queue.get()
+
     async with PartialMockSession() as session:
-        await engine.process_page(session, url)
-        engine.url_queue.task_done()
+        await core._process_page(session, url)
+        core.url_queue.task_done()
     
     # Verificar DB
     async with pool.acquire() as db:
