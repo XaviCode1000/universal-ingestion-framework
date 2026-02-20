@@ -436,9 +436,13 @@ class ResilientTransport(httpx.AsyncBaseTransport):
                 else:
                     # ⚠️ FALLBACK: httpx nativo (sin TLS impersonation)
                     self._base_transport = httpx.AsyncHTTPTransport()
+                    self._fallback_count += 1
+                    self._last_fallback_reason = "curl_cffi_not_available"
                     logger.warning(
-                        f"curl_cffi not available (use_curl_cffi={self.use_curl_cffi}, "
-                        f"CURL_CFFI_AVAILABLE={CURL_CFFI_AVAILABLE}), using httpx native transport"
+                        f"🛡️ [NETWORK FALLBACK] curl_cffi not available "
+                        f"(use_curl_cffi={self.use_curl_cffi}, "
+                        f"CURL_CFFI_AVAILABLE={CURL_CFFI_AVAILABLE}), "
+                        f"using httpx native transport (fallback #{self._fallback_count})"
                     )
 
         domain = self._extract_domain(request.url)
@@ -580,6 +584,19 @@ class ResilientTransport(httpx.AsyncBaseTransport):
         if domain in self._circuit_breakers:
             return self._circuit_breakers[domain].get_state(domain)
         return "closed"
+
+    def get_fallback_status(self) -> dict[str, Any]:
+        """Obtiene el estado del fallback para telemetría.
+
+        Returns:
+            Diccionario con información de fallback para la TUI.
+        """
+        return {
+            "fallback_count": self._fallback_count,
+            "last_fallback_reason": self._last_fallback_reason,
+            "curl_cffi_enabled": self._curl_cffi_enabled,
+            "current_transport": "curl_cffi" if self._curl_cffi_enabled else "httpx_native",
+        }
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
