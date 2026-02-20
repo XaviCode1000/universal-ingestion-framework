@@ -139,6 +139,9 @@ class DataWriter:
         self._failed_file: Path | None = None
         self._total_written: int = 0
 
+        # Lock para operación atómica sobre buffer (evita race condition)
+        self._buffer_lock: asyncio.Lock = asyncio.Lock()
+
     async def __aenter__(self) -> "DataWriter":
         """Inicializa el writer."""
         self.output_dir.mkdir(parents=True, exist_ok=True)
@@ -179,39 +182,52 @@ class DataWriter:
         # Validar contra esquema
         try:
             validated = self.schema(**data_dict)
-            self._buffer.append(validated.model_dump())
+            async with self._buffer_lock:
+                self._buffer.append(validated.model_dump())
         except ValidationError as e:
             # Item inválido: guardar en failed
             failed_item = FailedItem(
                 original_data=data_dict,
                 validation_error=str(e),
             )
-            self._failed_buffer.append(failed_item.model_dump())
+            async with self._buffer_lock:
+                self._failed_buffer.append(failed_item.model_dump())
             logger.warning(f"Item validation failed: {e}")
             return False
 
-        # Flush si buffer lleno
-        if len(self._buffer) >= self.buffer_size:
+        # Flush si buffer lleno (sin lock, flush tiene el suyo propio)
+        async with self._buffer_lock:
+            buffer_len = len(self._buffer)
+        if buffer_len >= self.buffer_size:
             await self.flush()
 
         return True
 
     async def flush(self) -> None:
         """Fuerza escritura del buffer a disco."""
-        if not self._buffer and not self._failed_buffer:
-            return
+        # Adquirir lock, copiar buffers, liberar lock INMEDIATAMENTE
+        async with self._buffer_lock:
+            if not self._buffer and not self._failed_buffer:
+                return
+
+            # Copia superficial para escribir (fuera del lock)
+            buffer_copy = list(self._buffer)
+            failed_copy = list(self._failed_buffer)
+
+            # Limpiar buffers ahora (dentro del lock)
+            self._buffer.clear()
+            self._failed_buffer.clear()
 
         now = time.time()
 
-        # Escribir items válidos
-        if self._buffer and self._main_file:
+        # Escribir items válidos (sin lock - I/O async)
+        if buffer_copy and self._main_file:
             await self._write_atomic(
                 self._main_file,
-                self._buffer,
+                buffer_copy,
             )
-            self._total_written += len(self._buffer)
-            count = len(self._buffer)
-            self._buffer.clear()
+            self._total_written += len(buffer_copy)
+            count = len(buffer_copy)
 
             # Notificar evento
             if self._on_flush:
@@ -224,13 +240,12 @@ class DataWriter:
                 )
                 self._on_flush(event)
 
-        # Escribir items fallidos
-        if self._failed_buffer and self._failed_file:
+        # Escribir items fallidos (sin lock - I/O async)
+        if failed_copy and self._failed_file:
             await self._write_atomic(
                 self._failed_file,
-                self._failed_buffer,
+                failed_copy,
             )
-            self._failed_buffer.clear()
 
         self._last_flush_time = now
         logger.debug(f"Flushed to {self._main_file}")
@@ -238,7 +253,7 @@ class DataWriter:
     async def _write_atomic(
         self,
         path: Path,
-        data: deque[dict[str, Any]],
+        data: list[dict[str, Any]],
     ) -> None:
         """Escribe datos de forma atómica.
 
@@ -307,14 +322,21 @@ class DataWriter:
 
     async def _force_flush(self) -> None:
         """Fuerza el flush de todo el buffer sin condiciones."""
-        if self._buffer:
-            await self._write_atomic(self._main_file, self._buffer)
-            self._total_written += len(self._buffer)
-            self._buffer.clear()
+        # Adquirir lock, copiar buffers, liberar lock INMEDIATAMENTE
+        async with self._buffer_lock:
+            buffer_copy = list(self._buffer)
+            failed_copy = list(self._failed_buffer)
 
-        if self._failed_buffer:
-            await self._write_atomic(self._failed_file, self._failed_buffer)
+            self._buffer.clear()
             self._failed_buffer.clear()
+
+        # Escribir sin lock
+        if buffer_copy and self._main_file:
+            await self._write_atomic(self._main_file, buffer_copy)
+            self._total_written += len(buffer_copy)
+
+        if failed_copy and self._failed_file:
+            await self._write_atomic(self._failed_file, failed_copy)
 
     @property
     def stats(self) -> dict[str, Any]:
