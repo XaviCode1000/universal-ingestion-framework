@@ -1026,17 +1026,20 @@ class EngineCore:
                     timeout=1.0,
                 )
 
-                # None es señal de shutdown
-                if item is None:
-                    # Importante: marcar como done para que join() funcione
+                try:
+                    # None es señal de shutdown
+                    if item is None:
+                        # Importante: marcar como done para que join() funcione
+                        self.data_queue.task_done()
+                        break
+
+                    # Escribir item
+                    if self._data_writer:
+                        await self._data_writer.write(item)
+
+                finally:
+                    # SIEMPRE marcar como done, incluso si falló el write
                     self.data_queue.task_done()
-                    break
-
-                # Escribir item
-                if self._data_writer:
-                    await self._data_writer.write(item)
-
-                self.data_queue.task_done()
 
             except asyncio.TimeoutError:
                 # Timeout, continuar el loop

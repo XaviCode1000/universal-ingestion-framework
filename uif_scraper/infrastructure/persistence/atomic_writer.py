@@ -253,15 +253,14 @@ class DataWriter:
         tmp_path = path.with_suffix(path.suffix + ".tmp")
 
         try:
-            # Escribir a archivo temporal
+            # Escribir a archivo temporal (dentro del context manager)
             async with aiofiles.open(tmp_path, "w", encoding="utf-8") as f:
                 if self.format == "jsonl":
                     for item in data:
                         line = json.dumps(item, ensure_ascii=False, default=str)
                         await f.write(line + "\n")
-
-            # Forzar escritura del SO
-            await f.sync()
+                # Flush interno del archivo
+                await f.flush()
 
             # Renombrar atómicamente
             tmp_path.replace(path)
