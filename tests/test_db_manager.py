@@ -1,5 +1,3 @@
-import asyncio
-
 import pytest
 
 from uif_scraper.db_manager import MigrationStatus, StateManager

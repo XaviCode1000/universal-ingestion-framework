@@ -53,3 +53,34 @@ DASHBOARD_UPDATE_INTERVAL: float = 0.25
 
 # HTTP cache max connections per host
 HTTP_MAX_CONNECTIONS_PER_HOST: int = 10
+
+# ============================================================================
+# V4.0 RESILIENCE & SCALE CONSTANTS
+# ============================================================================
+
+# Memory management
+SEEN_URLS_CACHE_MAXSIZE: int = 100000
+SEEN_ASSETS_CACHE_MAXSIZE: int = 100000
+SEEN_CACHE_TTL_SECONDS: int = 3600
+
+# DB Batching
+DEFAULT_DB_BATCH_SIZE: int = 100
+DEFAULT_DB_BATCH_INTERVAL: float = 1.0
+DB_PAGINATION_LIMIT: int = 1000
+
+# Robots.txt
+ROBOTS_CACHE_MAXSIZE: int = 100
+ROBOTS_CACHE_TTL_SECONDS: int = 3600
+ROBOTS_FETCH_TIMEOUT: int = 10
+
+# CAPTCHA Detection
+CAPTCHA_CONFIDENCE_THRESHOLD: float = 0.8
+
+# Adaptive Rate Limiting Jitter
+DEFAULT_JITTER_MAX: float = 0.5
+
+# Paths
+DEFAULT_DATA_DIR: str = "data"
+LOGS_DIR: str = "logs"
+RAW_DIR: str = "raw"
+PROCESSED_DIR: str = "processed"

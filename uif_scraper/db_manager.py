@@ -53,6 +53,16 @@ class StateManager:
                 )
                 """
             )
+            # Tabla para locks de misión (Fase 2)
+            await db.execute(
+                """
+                CREATE TABLE IF NOT EXISTS mission_locks (
+                    domain TEXT PRIMARY KEY,
+                    locked_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    owner_pid INTEGER
+                )
+                """
+            )
             # Índices para queries comunes
             await db.execute(
                 "CREATE INDEX IF NOT EXISTS idx_status_type ON urls(status, type)"
@@ -102,12 +112,7 @@ class StateManager:
                     await db.commit()
 
     async def start_batch_processor(self) -> None:
-        """Inicia el procesador batch explícitamente.
-
-        Nota: El batch processor NO se inicia automáticamente en __init__.
-        Debe llamarse a este método explícitamente cuando se desea usar
-        buffering batch.
-        """
+        """Inicia el procesador batch explícitamente."""
         if self._batch_task is None:
             await self._start_batch_processor()
 
@@ -124,24 +129,29 @@ class StateManager:
         # Flush final
         await self._flush_status_buffer()
 
+    async def exists(self, url: str) -> bool:
+        """Verifica si una URL ya existe en la base de datos."""
+        async with self.pool.acquire() as db:
+            async with db.execute("SELECT 1 FROM urls WHERE url = ?", (url,)) as cursor:
+                return await cursor.fetchone() is not None
+
+    async def get_total_count(self, m_type: str = "webpage") -> int:
+        """Obtiene el conteo total de URLs de un tipo específico."""
+        async with self.pool.acquire() as db:
+            async with db.execute(
+                "SELECT COUNT(*) FROM urls WHERE type = ?", (m_type,)
+            ) as cursor:
+                row = await cursor.fetchone()
+                return int(row[0]) if row else 0
+
     async def add_url(
         self, url: str, status: MigrationStatus, m_type: str = "webpage"
     ) -> None:
-        """Agrega una URL individual a la base de datos con validación temprana.
-
-        Args:
-            url: URL a agregar
-            status: Estado inicial
-            m_type: Tipo de recurso ("webpage" o "asset")
-
-        Raises:
-            ValueError: Si la URL tiene formato inválido o es demasiado larga.
-        """
-        # Validación temprana de URL
+        """Agrega una URL individual a la base de datos con validación temprana."""
         parsed = urlparse(url)
         if not parsed.scheme or not parsed.netloc:
             raise ValueError(f"Invalid URL format: {url}")
-        if len(url) > 2048:  # Límite práctico de URL
+        if len(url) > 2048:
             raise ValueError(f"URL too long: {len(url)} chars")
 
         async with self.pool.acquire() as db:
@@ -154,20 +164,10 @@ class StateManager:
     async def add_urls_batch(
         self, urls: list[tuple[str, MigrationStatus, str]], batch_size: int = 500
     ) -> None:
-        """Inserción batch eficiente para múltiples URLs con tamaño óptimo.
-
-        Args:
-            urls: Lista de tuplas (url, status, type)
-            batch_size: Tamaño máximo de cada batch para evitar locks largos.
-
-        Nota:
-            Los batches más grandes pueden causar locks prolongados en SQLite.
-            El valor por defecto (500) balancea performance y concurrencia.
-        """
+        """Inserción batch eficiente para múltiples URLs."""
         if not urls:
             return
 
-        # Validación temprana de todas las URLs antes de insertar
         for url, _, _ in urls:
             parsed = urlparse(url)
             if not parsed.scheme or not parsed.netloc:
@@ -175,7 +175,6 @@ class StateManager:
             if len(url) > 2048:
                 raise ValueError(f"URL too long: {len(url)} chars")
 
-        # Procesar en batches más pequeños para evitar locks largos
         for i in range(0, len(urls), batch_size):
             batch = urls[i : i + batch_size]
             async with self.pool.acquire() as db:
@@ -192,21 +191,8 @@ class StateManager:
         error_msg: str | None = None,
         immediate: bool = False,
     ) -> None:
-        """Actualiza estado de URL con buffering batch opcional.
-
-        Args:
-            url: URL a actualizar
-            status: Nuevo estado
-            error_msg: Mensaje de error (opcional, se trunca a 500 chars)
-            immediate: Si True, actualiza inmediatamente (para errores críticos)
-
-        Nota:
-            Por defecto (immediate=False), las actualizaciones se bufferizan
-            y se flushean cada batch_interval segundos o cuando se alcanza
-            batch_size actualizaciones.
-        """
+        """Actualiza estado de URL con buffering batch opcional."""
         if immediate:
-            # Actualización inmediata para casos críticos
             async with self.pool.acquire() as db:
                 if error_msg:
                     await db.execute(
@@ -220,19 +206,28 @@ class StateManager:
                     )
                 await db.commit()
         else:
-            # Buffer para batch processing - orden: (status, error_msg, url)
             async with self._buffer_lock:
                 self._status_buffer.append(
                     (status.value, url, error_msg[:500] if error_msg else None)
                 )
 
-            # Flush inmediato si buffer supera threshold
             if len(self._status_buffer) >= self._batch_size:
                 await self._flush_status_buffer()
 
     async def increment_retry(self, url: str) -> int:
         """Incrementa contador de reintentos y retorna el nuevo valor."""
         async with self.pool.acquire() as db:
+            # Usando RETURNING para mayor atomicidad (SQLite 3.35+)
+            async with db.execute(
+                "UPDATE urls SET retries = retries + 1, last_try = CURRENT_TIMESTAMP WHERE url = ? RETURNING retries",
+                (url,),
+            ) as cursor:
+                row = await cursor.fetchone()
+                if row:
+                    await db.commit()
+                    return int(row[0])
+
+            # Fallback para versiones antiguas de SQLite (aunque uv suele traer modernas)
             await db.execute(
                 "UPDATE urls SET retries = retries + 1, last_try = CURRENT_TIMESTAMP WHERE url = ?",
                 (url,),
@@ -245,16 +240,21 @@ class StateManager:
                 return row[0] if row else 0
 
     async def get_pending_urls(
-        self, m_type: str = "webpage", max_retries: int = 3
+        self,
+        m_type: str = "webpage",
+        max_retries: int = 3,
+        limit: int = 1000,
+        offset: int = 0,
     ) -> list[str]:
         """Obtiene URLs pendientes o fallidas con reintentos disponibles."""
         async with self.pool.acquire() as db:
-            query = """
+            query = f"""
                 SELECT url FROM urls
                 WHERE type = ? AND (
                     status = ?
                     OR (status = ? AND retries < ?)
                 )
+                LIMIT {limit} OFFSET {offset}
             """
             async with db.execute(
                 query,
@@ -269,17 +269,9 @@ class StateManager:
                 return [str(row[0]) for row in rows]
 
     async def get_stats(self, force_refresh: bool = False) -> dict[str, int]:
-        """Obtiene estadísticas de estado con caché TTL.
-
-        Args:
-            force_refresh: Si True, invalida el caché y consulta la DB.
-
-        Returns:
-            Diccionario con conteo por estado: {"completed": 100, "pending": 50, ...}
-        """
+        """Obtiene estadísticas de estado con caché TTL."""
         now = time.time()
 
-        # Usar caché si es válido y no se fuerza refresh
         if (
             not force_refresh
             and self._stats_cache is not None
@@ -296,10 +288,37 @@ class StateManager:
             async with db.execute(query) as cursor:
                 rows = await cursor.fetchall()
                 self._stats_cache = {str(row[0]): int(row[1]) for row in rows}
+                self._stats_cache["total_webpages"] = await self.get_total_count(
+                    "webpage"
+                )
+                self._stats_cache["total_assets"] = await self.get_total_count("asset")
                 self._stats_cached_at = now
                 return self._stats_cache
 
     def invalidate_stats_cache(self) -> None:
-        """Invalida el caché de estadísticas cuando hay cambios significativos."""
+        """Invalida el caché de estadísticas."""
         self._stats_cache = None
         self._stats_cached_at = 0
+
+    async def acquire_mission_lock(self, domain: str, pid: int) -> bool:
+        """Intenta adquirir un lock de misión para un dominio."""
+        async with self.pool.acquire() as db:
+            try:
+                await db.execute(
+                    "INSERT INTO mission_locks (domain, owner_pid) VALUES (?, ?)",
+                    (domain, pid),
+                )
+                await db.commit()
+                return True
+            except Exception:
+                # Ya existe un lock
+                return False
+
+    async def release_mission_lock(self, domain: str, pid: int) -> None:
+        """Libera un lock de misión."""
+        async with self.pool.acquire() as db:
+            await db.execute(
+                "DELETE FROM mission_locks WHERE domain = ? AND owner_pid = ?",
+                (domain, pid),
+            )
+            await db.commit()

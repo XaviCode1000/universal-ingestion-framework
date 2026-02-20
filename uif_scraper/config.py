@@ -21,6 +21,7 @@ class ScraperConfig(BaseModel):
     cache_dir: Path = Field(default_factory=lambda: Path("cache"))
     max_retries: int = 3
     timeout_seconds: int = 30
+    request_delay: float = 1.0  # Fase 1: Rate Limiting
     default_workers: int = 5
     asset_workers: int = 8
     dns_overrides: dict[str, str] = Field(default_factory=dict)
@@ -75,7 +76,7 @@ def get_config_path(custom_path: Path | None = None) -> Path:
 
 
 async def run_wizard() -> ScraperConfig:
-    console.print("[bold yellow]🛸 CONFIGURACIÓN DE UIF SCRAPER v3.0[/]")
+    console.print("[bold yellow]🛸 CONFIGURACIÓN DE UIF SCRAPER v4.0[/]")
 
     data_dir = await questionary.text(
         "Directorio de datos (resultados):", default="data"

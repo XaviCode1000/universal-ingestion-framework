@@ -1,6 +1,6 @@
 import asyncio
 import pytest
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 from uif_scraper.config import ScraperConfig
 from uif_scraper.core.engine_core import EngineCore
 from uif_scraper.db_manager import StateManager, MigrationStatus
@@ -19,10 +19,10 @@ async def test_request_shutdown_sets_event(tmp_path):
     db_path = tmp_path / "shutdown.db"
     pool = SQLitePool(db_path)
     await pool.initialize()
-    
+
     state = StateManager(pool)
     await state.initialize()
-    
+
     nav = NavigationService(TEST_URL, scope=ScrapingScope.BROAD)
     rep = ReporterService(MagicMock(), state)
 
@@ -55,11 +55,11 @@ async def test_page_worker_handles_cancelled_error(tmp_path):
     db_path = tmp_path / "worker.db"
     pool = SQLitePool(db_path)
     await pool.initialize()
-    
+
     state = StateManager(pool)
     await state.initialize()
     await state.add_url(TEST_URL, MigrationStatus.PENDING)
-    
+
     nav = NavigationService(TEST_URL, scope=ScrapingScope.BROAD)
     rep = ReporterService(MagicMock(), state)
 
@@ -115,10 +115,10 @@ async def test_worker_stops_when_shutdown_requested(tmp_path):
     db_path = tmp_path / "stop.db"
     pool = SQLitePool(db_path)
     await pool.initialize()
-    
+
     state = StateManager(pool)
     await state.initialize()
-    
+
     nav = NavigationService(TEST_URL, scope=ScrapingScope.BROAD)
     rep = ReporterService(MagicMock(), state)
 

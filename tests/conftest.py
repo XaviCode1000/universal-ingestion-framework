@@ -1,6 +1,5 @@
 import pytest
 import pytest_asyncio
-from pathlib import Path
 from uif_scraper.config import ScraperConfig
 from uif_scraper.db_pool import SQLitePool
 from uif_scraper.db_manager import StateManager

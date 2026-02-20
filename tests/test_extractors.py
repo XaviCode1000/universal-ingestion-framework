@@ -11,7 +11,11 @@ async def test_text_extractor_simple():
     html = "<html><body><h1>Test</h1><p>Hello World</p></body></html>"
     result = await extractor.extract(html, TEST_URL)
     assert "Hello World" in result["markdown"]
-    assert result["engine"] in ["html-to-markdown", "markitdown", "beautifulsoup-parachute"]
+    assert result["engine"] in [
+        "html-to-markdown",
+        "markitdown",
+        "beautifulsoup-parachute",
+    ]
 
 
 @pytest.mark.asyncio

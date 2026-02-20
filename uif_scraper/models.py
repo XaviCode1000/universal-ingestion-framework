@@ -20,6 +20,7 @@ class MigrationStatus(str, Enum):
     IN_PROGRESS = "in_progress"
     COMPLETED = "completed"
     FAILED = "failed"
+    SKIPPED_ROBOTS = "skipped_robots"
 
 
 class WebPageInput(BaseModel):
@@ -54,14 +55,14 @@ class WebPageInput(BaseModel):
         return value
 
 
-class WebPage(WebPageInput):
-    """Modelo inmutable para resultados de extracción de páginas web.
-
-    Extiende WebPageInput agregando metadata de sistema.
-    """
+class WebPage(BaseModel):
+    """Modelo inmutable para persistencia y reporte de página procesada."""
 
     model_config = ConfigDict(frozen=True)
 
-    status: MigrationStatus = MigrationStatus.COMPLETED
-    extracted_at: datetime = Field(default_factory=datetime.now)
-    error_message: str | None = Field(default=None, max_length=500)
+    url: str
+    title: str
+    content_md_path: str
+    assets: list[str]
+    processed_at: datetime = Field(default_factory=datetime.now)
+    version: str = "4.0.0"
