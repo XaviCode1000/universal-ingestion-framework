@@ -1,9 +1,11 @@
-"""Resilient HTTP Transport with retry policies and per-domain circuit breaker.
+"""Hybrid Resilient HTTP Transport with curl_cffi support and fallback.
 
-Este módulo implementa un transport de httpx que automáticamente:
-1. Reintenta peticiones fallidas con Exponential Backoff + Jitter
-2. Protege contra fallos en cascada usando un Circuit Breaker por dominio
-3. Notifica eventos de red para visualización en la TUI
+Este módulo implementa un transport híbrido que:
+1. Usa curl_cffi como primary (TLS impersonation, Cloudflare evasion)
+2. Fallback automático a httpx nativo si curl_cffi falla
+3. Reintentos con Exponential Backoff + Jitter
+4. Circuit Breaker por dominio con LRU eviction
+5. Notifica eventos de red para visualización en la TUI
 
 Uso:
     from httpx import AsyncClient
@@ -15,6 +17,8 @@ Uso:
         max_delay=30.0,
         circuit_threshold=5,
         circuit_timeout=60.0,
+        use_curl_cffi=True,  # Activar curl_cffi
+        impersonate="chrome120",  # Browser fingerprint
     )
 
     async with AsyncClient(transport=transport) as client:
@@ -37,6 +41,15 @@ from tenacity import (
     stop_after_attempt,
     wait_exponential_jitter,
 )
+
+# ── CURL_CFFI SUPPORT (OPTIONAL) ─────────────────────────────────────────────
+try:
+    from httpx_curl_cffi import AsyncCurlTransport, CurlOpt
+    CURL_CFFI_AVAILABLE = True
+except ImportError:
+    CURL_CFFI_AVAILABLE = False
+    AsyncCurlTransport = None  # type: ignore
+    CurlOpt = None  # type: ignore
 
 logger = logging.getLogger(__name__)
 
@@ -247,11 +260,13 @@ class DomainCircuitBreaker:
 
 
 class ResilientTransport(httpx.AsyncBaseTransport):
-    """Transport HTTP asíncrono con resiliencia incorporada.
+    """Hybrid Transport HTTP asíncrono con resiliencia incorporada.
 
     Características:
+    - ✅ curl_cffi como primary (TLS impersonation, Cloudflare evasion)
+    - ✅ Fallback automático a httpx nativo si curl_cffi falla
     - Reintentos automáticos con Exponential Backoff + Jitter
-    - Circuit Breaker por dominio (no global)
+    - Circuit Breaker por dominio (no global) con LRU eviction
     - Callbacks para eventos de red (retry, circuit state)
     - Completamente asíncrono (no bloquea la TUI)
 
@@ -265,6 +280,8 @@ class ResilientTransport(httpx.AsyncBaseTransport):
         timeout: Timeout total para la petición (segundos)
         on_retry: Callback para eventos de retry
         on_circuit_change: Callback para cambios de estado del circuit breaker
+        use_curl_cffi: Activar curl_cffi como backend primario (default: True)
+        impersonate: Browser fingerprint para curl_cffi (default: "chrome120")
     """
 
     def __init__(
@@ -278,6 +295,8 @@ class ResilientTransport(httpx.AsyncBaseTransport):
         timeout: float = 30.0,
         on_retry: Any = None,
         on_circuit_change: Any = None,
+        use_curl_cffi: bool = True,  # ✅ NUEVO: Activar curl_cffi
+        impersonate: str = "chrome120",  # ✅ NUEVO: Browser fingerprint
     ) -> None:
         super().__init__()
         self._max_retries = max_retries
@@ -285,6 +304,11 @@ class ResilientTransport(httpx.AsyncBaseTransport):
         self._max_delay = max_delay
         self._jitter = jitter
         self._timeout = timeout
+
+        # Hybrid Transport Configuration
+        self.use_curl_cffi = use_curl_cffi
+        self.impersonate = impersonate
+        self._curl_cffi_enabled = use_curl_cffi and CURL_CFFI_AVAILABLE
 
         # Circuit breakers por dominio - NO global
         self._circuit_breakers: dict[str, DomainCircuitBreaker] = {}
@@ -302,8 +326,13 @@ class ResilientTransport(httpx.AsyncBaseTransport):
             self._wrap_circuit_callback()
         )
 
-        # Transport base para delegar peticiones
-        self._base_transport: httpx.AsyncHTTPTransport | None = None
+        # Transport base para delegar peticiones (lazy init)
+        self._base_transport: httpx.AsyncBaseTransport | None = None
+        self._transport_lock = asyncio.Lock()
+
+        # Tracking para fallback
+        self._fallback_count: int = 0
+        self._last_fallback_reason: str | None = None
 
     def _wrap_retry_callback(self) -> NetworkRetryCallback | None:
         """Convierte callback simple a formato dataclass."""
@@ -383,13 +412,34 @@ class ResilientTransport(httpx.AsyncBaseTransport):
         self,
         request: httpx.Request,
     ) -> httpx.Response:
-        """Maneja una petición HTTP asíncrona con resiliencia.
+        """Maneja una petición HTTP asíncrona con resiliencia híbrida.
+
+        Estrategia:
+        1. Intenta con curl_cffi (TLS impersonation, Cloudflare evasion)
+        2. Fallback automático a httpx nativo si curl_cffi falla
+        3. Reintentos con Exponential Backoff + Jitter
+        4. Circuit Breaker por dominio
 
         Este es el método principal que httpx llama cuando se hace una petición.
         """
-        # Lazy init del transport base
-        if self._base_transport is None:
-            self._base_transport = httpx.AsyncHTTPTransport()
+        # Lazy init del transport base con lock para concurrencia
+        async with self._transport_lock:
+            if self._base_transport is None:
+                if self._curl_cffi_enabled:
+                    # ✅ PRIMARY: curl_cffi con browser impersonation
+                    self._base_transport = AsyncCurlTransport(
+                        impersonate=self.impersonate,
+                        default_headers=True,
+                        curl_options={CurlOpt.FRESH_CONNECT: True},  # Requerido para concurrencia
+                    )
+                    logger.info(f"Initialized AsyncCurlTransport with impersonate={self.impersonate}")
+                else:
+                    # ⚠️ FALLBACK: httpx nativo (sin TLS impersonation)
+                    self._base_transport = httpx.AsyncHTTPTransport()
+                    logger.warning(
+                        f"curl_cffi not available (use_curl_cffi={self.use_curl_cffi}, "
+                        f"CURL_CFFI_AVAILABLE={CURL_CFFI_AVAILABLE}), using httpx native transport"
+                    )
 
         domain = self._extract_domain(request.url)
         circuit_breaker = await self._get_circuit_breaker(domain)
@@ -417,6 +467,7 @@ class ResilientTransport(httpx.AsyncBaseTransport):
                         httpx.ConnectTimeout,
                         httpx.ReadTimeout,
                         httpx.RemoteProtocolError,
+                        httpx.HTTPStatusError,
                     )
                 ),
                 stop=stop_after_attempt(self._max_retries),
@@ -447,7 +498,7 @@ class ResilientTransport(httpx.AsyncBaseTransport):
                                 response=response,
                             )
 
-                        # Éxito
+                        # Éxito: registrar y retornar
                         circuit_breaker.record_success(domain)
 
                         # Notificar cambio de estado si hubo cambio
@@ -546,6 +597,8 @@ def create_resilient_transport(
     timeout: float = 30.0,
     on_retry: Any = None,
     on_circuit_change: Any = None,
+    use_curl_cffi: bool = True,  # ✅ NUEVO: Activar curl_cffi
+    impersonate: str = "chrome120",  # ✅ NUEVO: Browser fingerprint
 ) -> ResilientTransport:
     """Factory function para crear un ResilientTransport configurado.
 
@@ -559,6 +612,8 @@ def create_resilient_transport(
         timeout: Timeout de la petición
         on_retry: Callback para eventos de retry
         on_circuit_change: Callback para cambios de circuit breaker
+        use_curl_cffi: Activar curl_cffi como backend primario (default: True)
+        impersonate: Browser fingerprint para TLS impersonation (default: "chrome120")
 
     Returns:
         Instancia configurada de ResilientTransport
@@ -573,4 +628,6 @@ def create_resilient_transport(
         timeout=timeout,
         on_retry=on_retry,
         on_circuit_change=on_circuit_change,
+        use_curl_cffi=use_curl_cffi,
+        impersonate=impersonate,
     )

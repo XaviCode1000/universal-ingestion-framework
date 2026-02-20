@@ -215,6 +215,7 @@ async def _run_async(
 
     # Create ResilientTransport for network resilience
     # Note: This transport handles retries, circuit breaker, and TUI callbacks
+    # ✅ HYBRID MODE: curl_cffi primary, httpx fallback
     _resilient_transport = create_resilient_transport(
         max_retries=3,
         base_delay=1.0,
@@ -224,6 +225,8 @@ async def _run_async(
         circuit_timeout=60.0,
         on_retry=on_network_retry,
         on_circuit_change=on_circuit_change,
+        use_curl_cffi=True,  # ✅ ACTIVAR CURL_CFFI (TLS impersonation)
+        impersonate="chrome120",  # Chrome 120 fingerprint
     )
 
     # Create EngineCore directly with all dependencies
