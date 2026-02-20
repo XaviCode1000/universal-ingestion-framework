@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 from functools import lru_cache
 from typing import Any
 from urllib.parse import urlparse
@@ -138,8 +139,8 @@ class MetadataExtractor(IExtractor):
         twitter_title = twitter_data.get("title") if isinstance(twitter_data, dict) else doc_meta.get("twitter_title")
 
         # === TÍTULO ===
-        # Prioridad: title tag > OG title > "Documento"
-        title = doc_meta.get("title") or og_title or "Documento"
+        # Prioridad: OG title > title tag > "Documento" (los tests esperan OG primero)
+        title = og_title or doc_meta.get("title") or "Documento"
         if title:
             title = str(title).split("|")[0].split(" - ")[0].strip()
 
@@ -149,8 +150,12 @@ class MetadataExtractor(IExtractor):
         # Date: structured data > meta > "N/A"
         date = doc_meta.get("date") or "N/A"
 
-        # Sitename: OG > domain
-        sitename = doc_meta.get("sitename") or doc_meta.get("og_site_name") or domain
+        # Sitename: OG site_name > domain
+        # html-to-markdown pone og:site_name en open_graph['site_name']
+        sitename = None
+        if isinstance(og_data, dict):
+            sitename = og_data.get("site_name")
+        sitename = sitename or domain
 
         # Description: meta description
         description = doc_meta.get("description")
@@ -163,14 +168,24 @@ class MetadataExtractor(IExtractor):
             keywords = list(keywords_raw) if keywords_raw else []
 
         # === STRUCTURED DATA (JSON-LD) ===
+        # html-to-markdown devuelve structured_data como lista de dicts con:
+        # - data_type: "json_ld", "microdata", "rdfa"
+        # - raw_json: string del JSON (para json_ld)
+        # - schema_type: tipo de schema (Article, Product, etc.)
         structured_data = md_metadata.get("structured_data", [])
         json_ld: dict[str, Any] | None = None
         if structured_data and isinstance(structured_data, list):
-            # Tomar el primer JSON-LD válido
             for sd in structured_data:
-                if isinstance(sd, dict) and sd.get("@context"):
-                    json_ld = sd
-                    break
+                if isinstance(sd, dict) and sd.get("data_type") == "json_ld":
+                    # Parsear el raw_json string
+                    raw_json = sd.get("raw_json")
+                    if raw_json and isinstance(raw_json, str):
+                        try:
+                            json_ld = json.loads(raw_json)
+                            break
+                        except (json.JSONDecodeError, ValueError):
+                            # JSON inválido, continuar con el siguiente
+                            continue
 
         # === HEADERS H1-H6 (para TOC - Fase B) ===
         # html-to-markdown ya extrae headers con nivel, texto, id
