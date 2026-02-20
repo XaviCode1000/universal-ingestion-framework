@@ -169,7 +169,7 @@ async def test_e2e_text_extractor_real_html(tmp_path):
     E2E: TextExtractor con HTML real de webscraper.io.
     
     Verifica:
-    - Trafilatura extrae contenido
+    - html-to-markdown extrae contenido
     - Fallback a MarkItDown funciona
     - Output tiene markdown válido
     """
@@ -196,10 +196,10 @@ async def test_e2e_text_extractor_real_html(tmp_path):
     # Verificar resultado
     assert "markdown" in text_result
     assert "engine" in text_result
-    assert text_result["engine"] in ["trafilatura", "markitdown", "trafilatura-fallback"]
+    assert text_result["engine"] in ["html-to-markdown", "markitdown", "html-to-markdown-fallback"]
     
     # Debería tener algo de contenido
-    if text_result["engine"] == "trafilatura":
+    if text_result["engine"] == "html-to-markdown":
         assert len(text_result["markdown"]) > 0
     
     # Extraer metadata

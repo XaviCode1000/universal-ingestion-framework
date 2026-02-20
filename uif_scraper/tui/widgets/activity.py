@@ -33,7 +33,8 @@ class ActivityItem(Vertical):
         height: 1;
     }
 
-    ActivityItem .engine-trafilatura {
+    ActivityItem .engine-trafilatura,
+    ActivityItem .engine-html-to-markdown {
         color: #a6e3a1;
     }
 

@@ -4,7 +4,7 @@ Tests unitarios para el sistema de fallback multinivel de TextExtractor.
 Verifica que el extractor SIEMPRE devuelva contenido, incluso con HTML problemático.
 
 Niveles de fallback:
-1. Trafilatura (calidad alta)
+1. html-to-markdown (calidad alta, 18x más rápido)
 2. MarkItDown (fallback estructurado)
 3. BeautifulSoup (parachute - siempre devuelve algo)
 4. Mensaje de error (último recurso)
@@ -20,14 +20,14 @@ def extractor() -> TextExtractor:
     return TextExtractor()
 
 
-class TestTrafilaturaLevel:
-    """Nivel 1: Trafilatura para HTML bien estructurado."""
+class TestHtmlToMarkdownLevel:
+    """Nivel 1: html-to-markdown para HTML bien estructurado."""
 
     @pytest.mark.asyncio
     async def test_extracts_well_structured_html(
         self, extractor: TextExtractor
     ) -> None:
-        """HTML con estructura de artículo debe usar Trafilatura."""
+        """HTML con estructura de artículo debe usar html-to-markdown."""
         html = """
         <html>
             <head><title>Test Article</title></head>
@@ -43,7 +43,7 @@ class TestTrafilaturaLevel:
         """
         result = await extractor.extract(html, "https://example.com/article")
 
-        assert result["engine"] == "trafilatura"
+        assert result["engine"] == "html-to-markdown"
         assert len(result["markdown"]) > 100
         assert "How to Build a Scraper" in result["markdown"]
 
@@ -68,20 +68,20 @@ class TestTrafilaturaLevel:
         """
         result = await extractor.extract(html, "http://books.toscrape.com/book.html")
 
-        assert result["engine"] == "trafilatura"
+        assert result["engine"] == "html-to-markdown"
         assert len(result["markdown"]) > 50
         assert "A Light in the Attic" in result["markdown"]
 
 
 class TestMarkItDownLevel:
-    """Nivel 2: MarkItDown cuando Trafilatura falla."""
+    """Nivel 2: MarkItDown cuando html-to-markdown falla."""
 
     @pytest.mark.asyncio
     async def test_uses_markitdown_for_complex_html(
         self, extractor: TextExtractor
     ) -> None:
-        """HTML complejo que Trafilatura no maneja bien debe usar MarkItDown."""
-        # Este HTML podría hacer que Trafilatura devuelva None o muy poco
+        """HTML complejo que html-to-markdown no maneja bien debe usar MarkItDown."""
+        # Este HTML podría hacer que html-to-markdown devuelva None o muy poco
         html = """
         <html>
             <head><title>Product Page</title></head>
@@ -125,7 +125,7 @@ class TestBeautifulSoupParachute:
         """
         result = await extractor.extract(html, "https://test.com/product")
 
-        # Cualquier motor de fallback es válido (trafilatura, markitdown, beautifulsoup)
+        # Cualquier motor de fallback es válido (html-to-markdown, markitdown, beautifulsoup)
         assert result["engine"] != "none"
         assert len(result["markdown"]) > 0
         assert "$29.99" in result["markdown"]
@@ -133,7 +133,7 @@ class TestBeautifulSoupParachute:
     @pytest.mark.asyncio
     async def test_parachute_for_malformed_html(self, extractor: TextExtractor) -> None:
         """HTML muy mal formado debe activar el parachute BeautifulSoup."""
-        # HTML intencionalmente roto que debería hacer fallar Trafilatura y MarkItDown
+        # HTML intencionalmente roto que debería hacer fallar html-to-markdown y MarkItDown
         html = "<html><body>@@@BROKEN@@@<div>Content</div></broken>"
         result = await extractor.extract(html, "https://test.com/broken")
 

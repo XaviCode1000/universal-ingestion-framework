@@ -127,7 +127,7 @@ class RichDashboard:
         table.add_column("Motor", ratio=1, justify="center")
 
         for entry in self._core.activity_log[-6:]:
-            color = "green" if entry["engine"] == "trafilatura" else "yellow"
+            color = "green" if entry["engine"] in ["trafilatura", "html-to-markdown"] else "yellow"
             title = entry["title"]
             if len(title) > 45:
                 title = title[:45] + ".."
