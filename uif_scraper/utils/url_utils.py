@@ -23,7 +23,16 @@ def slugify(value: str) -> str:
     return python_slugify(value)
 
 
-def smart_url_normalize(url: str) -> str:
+def smart_url_normalize(url: str, force_https: bool = False) -> str:
+    """Normaliza URL con encoding consistente y opcionalmente fuerza HTTPS.
+
+    Args:
+        url: URL a normalizar
+        force_https: Si True, convierte http:// a https://
+
+    Returns:
+        URL normalizada
+    """
     if not url:
         return ""
 
@@ -32,9 +41,12 @@ def smart_url_normalize(url: str) -> str:
     query_params = parse_qsl(parsed.query, keep_blank_values=True)
     clean_query = urlencode(query_params, quote_via=quote_plus)
 
+    # Forzar HTTPS si se solicita
+    scheme = "https" if force_https and parsed.scheme == "http" else parsed.scheme
+
     clean_url = urlunparse(
         (
-            parsed.scheme,
+            scheme,
             parsed.netloc,
             clean_path,
             parsed.params,

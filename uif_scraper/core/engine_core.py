@@ -12,6 +12,7 @@ import json
 from abc import ABC, abstractmethod
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
+from urllib.parse import urlparse
 
 import aiofiles
 import aiohttp
@@ -512,6 +513,12 @@ class EngineCore:
 
     async def _process_page(self, session: AsyncStealthySession, url: str) -> None:
         """Process a single page: fetch, extract, save, queue links."""
+        # Normalizar URL a HTTPS si el dominio base usa HTTPS
+        base_scheme = urlparse(self.navigation.base_url).scheme
+        if base_scheme == "https" and url.startswith("http://"):
+            url = url.replace("http://", "https://", 1)
+            logger.debug(f"URL normalizada a HTTPS: {url}")
+
         if not self.circuit_breaker.should_allow(self.navigation.domain):
             logger.warning(f"Circuit broken. Skipping {url}")
             await self.url_queue.put(url)
