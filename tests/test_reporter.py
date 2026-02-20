@@ -1,5 +1,4 @@
 import pytest
-from unittest.mock import MagicMock
 from rich.console import Console
 from io import StringIO
 from uif_scraper.db_manager import StateManager, MigrationStatus

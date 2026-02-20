@@ -16,12 +16,11 @@ Saltar si no hay conexión:
 """
 import asyncio
 import pytest
-from pathlib import Path
-from unittest.mock import MagicMock, AsyncMock, patch
+from unittest.mock import MagicMock
 
 from uif_scraper.config import ScraperConfig
 from uif_scraper.core.engine_core import EngineCore
-from uif_scraper.db_manager import StateManager, MigrationStatus
+from uif_scraper.db_manager import StateManager
 from uif_scraper.db_pool import SQLitePool
 from uif_scraper.navigation import NavigationService
 from uif_scraper.reporter import ReporterService

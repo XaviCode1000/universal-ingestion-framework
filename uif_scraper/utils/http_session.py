@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import logging
+import ssl
 from typing import Optional
 
 import aiohttp
+import certifi
 
 logger = logging.getLogger(__name__)
 
@@ -37,6 +39,7 @@ class HTTPSessionCache:
         timeout_total: float = 30.0,
         timeout_connect: float = 10.0,
         timeout_read: float = 20.0,
+        verify_ssl: bool = True,
     ):
         """Inicializa caché de sesiones HTTP.
 
@@ -46,6 +49,7 @@ class HTTPSessionCache:
             timeout_total: Timeout máximo total en segundos
             timeout_connect: Timeout para establecimiento de conexión
             timeout_read: Timeout para lectura de respuesta
+            verify_ssl: Si se debe verificar el certificado SSL (por defecto True)
         """
         self._session: Optional[aiohttp.ClientSession] = None
         self._max_pool_size = max_pool_size
@@ -53,10 +57,15 @@ class HTTPSessionCache:
         self._timeout_total = timeout_total
         self._timeout_connect = timeout_connect
         self._timeout_read = timeout_read
+        self._verify_ssl = verify_ssl
         self._connector: Optional[aiohttp.TCPConnector] = None
 
     def _create_connector(self) -> aiohttp.TCPConnector:
         """Configura connection pooling optimizado."""
+        ssl_context = None
+        if self._verify_ssl:
+            ssl_context = ssl.create_default_context(cafile=certifi.where())
+
         return aiohttp.TCPConnector(
             limit=self._max_pool_size,  # Total conexiones simultáneas
             limit_per_host=self._max_per_host,  # Por dominio
@@ -65,7 +74,7 @@ class HTTPSessionCache:
             enable_cleanup_closed=True,  # Limpia conexiones cerradas
             force_close=False,  # Reutiliza conexiones
             keepalive_timeout=30,  # Keep-alive 30s
-            ssl=False,  # Opcional: deshabilitar SSL verify para scraping
+            ssl=ssl_context,
         )
 
     async def get_session(self) -> aiohttp.ClientSession:
@@ -99,9 +108,10 @@ class HTTPSessionCache:
                 raise_for_status=False,
             )
             logger.debug(
-                "Created new HTTP session with pool_size=%d, per_host=%d",
+                "Created new HTTP session with pool_size=%d, per_host=%d, verify_ssl=%s",
                 self._max_pool_size,
                 self._max_per_host,
+                self._verify_ssl,
             )
 
         return self._session

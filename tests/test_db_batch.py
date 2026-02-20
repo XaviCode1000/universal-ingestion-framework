@@ -1,5 +1,5 @@
 import pytest
-from uif_scraper.db_manager import StateManager, MigrationStatus
+from uif_scraper.db_manager import MigrationStatus
 
 
 @pytest.mark.asyncio

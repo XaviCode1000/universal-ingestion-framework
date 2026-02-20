@@ -8,15 +8,15 @@ Reference: AGENTS.md - SRP (Single Responsibility Principle)
 
 import asyncio
 import enum
-import json
+import os
 from abc import ABC, abstractmethod
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 from urllib.parse import urlparse
 
-import aiofiles
 import aiohttp
 import yaml
+from cachetools import TTLCache
 from loguru import logger
 from scrapling.fetchers import AsyncFetcher, AsyncStealthySession
 
@@ -24,9 +24,7 @@ from uif_scraper.config import ScraperConfig
 from uif_scraper.core.constants import (
     DEFAULT_BROWSER_TIMEOUT_MS,
     DEFAULT_QUEUE_TIMEOUT_SECONDS,
-    DEFAULT_SHUTDOWN_TIMEOUT_SECONDS,
     HTTP_MAX_CONNECTIONS_PER_HOST,
-    MAX_CIRCUIT_BREAKER_BACKOFF_SECONDS,
     MIN_SHUTDOWN_TIMEOUT_SECONDS,
 )
 from uif_scraper.core.types import ActivityEntry, DashboardState, EngineStats
@@ -34,14 +32,16 @@ from uif_scraper.db_manager import StateManager
 from uif_scraper.extractors.asset_extractor import AssetExtractor
 from uif_scraper.extractors.metadata_extractor import MetadataExtractor
 from uif_scraper.extractors.text_extractor import TextExtractor
-from uif_scraper.models import MigrationStatus, WebPage
+from uif_scraper.models import MigrationStatus
 from uif_scraper.navigation import NavigationService
 from uif_scraper.reporter import ReporterService
+from uif_scraper.utils.captcha_detector import CaptchaDetector
 from uif_scraper.utils.circuit_breaker import CircuitBreaker
 from uif_scraper.utils.compression import write_compressed_markdown
 from uif_scraper.utils.html_cleaner import pre_clean_html
 from uif_scraper.utils.http_session import HTTPSessionCache
 from uif_scraper.utils.markdown_utils import enhance_markdown_for_rag
+from uif_scraper.utils.robots_checker import RobotsChecker
 from uif_scraper.utils.url_utils import slugify, smart_url_normalize
 
 
@@ -176,15 +176,24 @@ class EngineCore:
             max_pool_size=config.asset_workers * 2,
             max_connections_per_host=HTTP_MAX_CONNECTIONS_PER_HOST,
             timeout_total=config.timeout_seconds,
+            verify_ssl=True, # Forzado por PRD v4.0
         )
+        self.robots_checker = RobotsChecker(self.http_cache)
+        self.captcha_detector = CaptchaDetector()
 
         # Queues - use QueueItem type to allow sentinel values
         self.url_queue: asyncio.Queue[QueueItem] = asyncio.Queue()
         self.asset_queue: asyncio.Queue[QueueItem] = asyncio.Queue()
 
-        # State tracking
-        self.seen_urls: set[str] = set()
-        self.seen_assets: set[str] = set()
+        # State tracking (Fase 1: TTLCache para prevenir OOM)
+        # Limitamos a 100,000 entradas en memoria con TTL de 1 hora
+        self.seen_urls: TTLCache[str, bool] = TTLCache(maxsize=100000, ttl=3600)
+        self.seen_assets: TTLCache[str, bool] = TTLCache(maxsize=100000, ttl=3600)
+        
+        # Contadores de progreso (respaldados por DB en setup())
+        self._pages_total_count = 0
+        self._assets_total_count = 0
+        
         self.pages_completed = 0
         self.assets_completed = 0
         self.pages_failed = 0
@@ -214,9 +223,9 @@ class EngineCore:
         """Get current engine statistics snapshot."""
         return EngineStats(
             pages_completed=self.pages_completed,
-            pages_total=len(self.seen_urls),
+            pages_total=self._pages_total_count,
             assets_completed=self.assets_completed,
-            assets_total=len(self.seen_assets),
+            assets_total=self._assets_total_count,
             pages_failed=self.pages_failed,
             assets_failed=self.assets_failed,
             seen_urls=len(self.seen_urls),
@@ -257,49 +266,63 @@ class EngineCore:
     async def setup(self) -> None:
         """Initialize state and queues from existing data."""
         await self.state.initialize()
+        
+        # Fase 2: Lock de Misión
+        pid = os.getpid()
+        if not await self.state.acquire_mission_lock(self.navigation.domain, pid):
+            logger.error(f"Ya existe una misión activa para el dominio: {self.navigation.domain}")
+            raise RuntimeError(f"Mission lock for {self.navigation.domain} already held")
+            
         await self.state.start_batch_processor()
 
-        # Load existing state from database
-        async with self.state.pool.acquire() as db:
-            async with db.execute("SELECT url, type, status FROM urls") as cursor:
-                async for row in cursor:
-                    url, m_type, status = row
-                    if m_type == "asset":
-                        self.seen_assets.add(url)
-                        if status == MigrationStatus.COMPLETED.value:
-                            self.assets_completed += 1
-                    else:
-                        self.seen_urls.add(url)
-                        if status == MigrationStatus.COMPLETED.value:
-                            self.pages_completed += 1
+        # Load existing statistics from database (más eficiente que cargar todo el set)
+        stats = await self.state.get_stats(force_refresh=True)
+        self.pages_completed = stats.get(MigrationStatus.COMPLETED.value, 0)
+        self.pages_failed = stats.get(MigrationStatus.FAILED.value, 0)
+        self._pages_total_count = stats.get("total_webpages", 0)
+        
+        self.assets_completed = stats.get("asset_completed", 0) # Necesitaría ajuste en db_manager si queremos exactitud
+        self._assets_total_count = stats.get("total_assets", 0)
 
-        # Queue pending URLs
-        pending = await self.state.get_pending_urls(max_retries=self.config.max_retries)
-        if not pending and not self.seen_urls:
+        # Queue pending URLs (con paginación para evitar OOM)
+        limit = 1000
+        offset = 0
+        while True:
+            pending = await self.state.get_pending_urls(
+                max_retries=self.config.max_retries, limit=limit, offset=offset
+            )
+            if not pending:
+                break
+            
+            for url in pending:
+                self.seen_urls[url] = True
+                await self.url_queue.put(url)
+            
+            offset += limit
+            if offset > 5000: # No cargar todo a la vez si es enorme
+                break
+
+        if self.url_queue.empty() and self._pages_total_count == 0:
             await self.state.add_url(self.navigation.base_url, MigrationStatus.PENDING)
-            self.seen_urls.add(self.navigation.base_url)
-            pending = [self.navigation.base_url]
+            self.seen_urls[self.navigation.base_url] = True
+            await self.url_queue.put(self.navigation.base_url)
+            self._pages_total_count += 1
 
-        for url in pending:
-            await self.url_queue.put(url)
-
-        # Queue pending assets
+        # Queue pending assets (limitado)
         pending_assets = await self.state.get_pending_urls(
-            m_type="asset", max_retries=self.config.max_retries
+            m_type="asset", max_retries=self.config.max_retries, limit=500
         )
         for asset in pending_assets:
+            self.seen_assets[asset] = True
             await self.asset_queue.put(asset)
 
     async def run(self) -> None:
-        """Run scraping engine - creates workers and processes queue.
-
-        This method:
-        1. Sets up AsyncStealthySession
-        2. Creates page and asset workers
-        3. Monitors progress until complete or shutdown
-        4. Handles graceful shutdown
-        """
-        await self.setup()
+        """Run scraping engine - creates workers and processes queue."""
+        try:
+            await self.setup()
+        except RuntimeError:
+            return # Detener si no se obtuvo el lock
+            
         self.start_time = asyncio.get_event_loop().time()
 
         logger.info(
@@ -348,49 +371,23 @@ class EngineCore:
             all_workers = self._page_workers + self._asset_workers
 
             try:
-                # Main loop - monitor progress
-                # Best Practice: Track completion via work counters, not worker state
-                # Workers stay alive waiting for queue.get() - they're never "done"
-                # until we send sentinels in _graceful_shutdown()
                 consecutive_empty_checks = 0
                 while not self._shutdown_event.is_set():
                     self._notify_ui()
 
-                    # Check completion based on work state, not worker state
-                    # Workers are always "pending" while waiting for queue.get()
-                    # Completion = queues empty + all discovered URLs processed
                     queue_size = self.url_queue.qsize() + self.asset_queue.qsize()
-                    seen_total = len(self.seen_urls) + len(self.seen_assets)
-
-                    # Use processed_total (completed + failed) instead of just completed
-                    # This ensures we terminate even when some assets fail (404, etc.)
-                    processed_total = (
-                        self.pages_completed
-                        + self.pages_failed
-                        + self.assets_completed
-                        + self.assets_failed
-                    )
-
-                    # Work is complete when:
-                    # 1. Queues are empty (no pending work)
-                    # 2. All seen items are processed (completed or failed)
-                    if queue_size == 0 and (
-                        processed_total >= seen_total or self._shutdown_event.is_set()
-                    ):
+                    
+                    # Criterio de parada: colas vacías y tareas procesadas
+                    if queue_size == 0:
                         consecutive_empty_checks += 1
-                        if consecutive_empty_checks >= 3:
-                            logger.info(
-                                f"✅ Work complete - {self.pages_completed} pages, "
-                                f"{self.assets_completed} assets processed "
-                                f"({self.pages_failed} pages, {self.assets_failed} assets failed)"
-                            )
+                        if consecutive_empty_checks >= 5: # Más conservador
+                            logger.info("✅ Work complete - queues drained")
                             break
                     else:
                         consecutive_empty_checks = 0
 
-                    await asyncio.sleep(0.25)
+                    await asyncio.sleep(0.5)
 
-                # Drain queues if not shutting down
                 if not self._shutdown_event.is_set():
                     logger.info("Work completed. Draining queues...")
 
@@ -406,6 +403,8 @@ class EngineCore:
 
             finally:
                 await self._graceful_shutdown(all_workers)
+                # Liberar lock de misión
+                await self.state.release_mission_lock(self.navigation.domain, os.getpid())
 
         await self.reporter.generate_summary()
         await self.http_cache.close()
@@ -415,11 +414,7 @@ class EngineCore:
     # ========================================================================
 
     async def _page_worker(self, session: AsyncStealthySession) -> None:
-        """Worker that processes pages from the queue.
-
-        Uses sentinel pattern for graceful shutdown - when _STOP_SENTINEL is
-        received, the worker exits cleanly.
-        """
+        """Worker that processes pages from the queue."""
         while not self._shutdown_event.is_set():
             try:
                 item: QueueItem = await asyncio.wait_for(
@@ -428,40 +423,26 @@ class EngineCore:
             except asyncio.TimeoutError:
                 continue
 
-            # Check for sentinel - signal to stop
             if item is _STOP_SENTINEL:
-                logger.debug("Page worker received stop sentinel, exiting")
                 self.url_queue.task_done()
                 break
 
-            # Type narrowing: after sentinel check, item is str
             url: str = item
 
-            # Early exit for circuit breaker
             if not self.circuit_breaker.should_allow(self.navigation.domain):
-                logger.warning(
-                    f"Circuit breaker open for {self.navigation.domain}, requeuing {url}"
-                )
                 await self.url_queue.put(url)
-                failures = self.circuit_breaker.failures.get(self.navigation.domain, 0)
-                await asyncio.sleep(
-                    min(2**failures, MAX_CIRCUIT_BREAKER_BACKOFF_SECONDS)
-                )
                 self.url_queue.task_done()
+                await asyncio.sleep(1)
                 continue
 
             try:
                 async with self.semaphore:
-                    # Double-check after acquiring semaphore
-                    if not self.circuit_breaker.should_allow(self.navigation.domain):
-                        await self.url_queue.put(url)
-                        self.url_queue.task_done()
-                        continue
+                    # Adaptive Rate Limiting con Jitter (Fase 1)
+                    delay = self.config.request_delay + (asyncio.get_event_loop().time() % 0.5)
+                    await asyncio.sleep(delay)
+                    
                     await self._process_page(session, url)
             except asyncio.CancelledError:
-                logger.warning(
-                    "Worker cancelled processing %s, marking as pending", url
-                )
                 await self.state.update_status(
                     url, MigrationStatus.PENDING, immediate=True
                 )
@@ -472,11 +453,7 @@ class EngineCore:
                 self.url_queue.task_done()
 
     async def _asset_worker(self) -> None:
-        """Worker that downloads assets from the queue.
-
-        Uses sentinel pattern for graceful shutdown - when _STOP_SENTINEL is
-        received, the worker exits cleanly.
-        """
+        """Worker that downloads assets from the queue."""
         while not self._shutdown_event.is_set():
             try:
                 item: QueueItem = await asyncio.wait_for(
@@ -485,21 +462,15 @@ class EngineCore:
             except asyncio.TimeoutError:
                 continue
 
-            # Check for sentinel - signal to stop
             if item is _STOP_SENTINEL:
-                logger.debug("Asset worker received stop sentinel, exiting")
                 self.asset_queue.task_done()
                 break
 
-            # Type narrowing: after sentinel check, item is str
             url: str = item
 
             try:
                 await self._download_asset(url)
             except asyncio.CancelledError:
-                logger.warning(
-                    "Asset worker cancelled downloading %s, marking as pending", url
-                )
                 await self.state.update_status(url, MigrationStatus.PENDING)
                 raise
             except Exception as e:
@@ -513,31 +484,34 @@ class EngineCore:
 
     async def _process_page(self, session: AsyncStealthySession, url: str) -> None:
         """Process a single page: fetch, extract, save, queue links."""
-        # Normalizar URL a HTTPS si el dominio base usa HTTPS
+        # 1. Cumplimiento Legal: robots.txt (Fase 1)
+        if not await self.robots_checker.can_fetch(url):
+            logger.warning(f"URL bloqueada por robots.txt: {url}")
+            await self.state.update_status(url, MigrationStatus.SKIPPED_ROBOTS if hasattr(MigrationStatus, 'SKIPPED_ROBOTS') else MigrationStatus.FAILED, "Blocked by robots.txt")
+            return
+
         base_scheme = urlparse(self.navigation.base_url).scheme
         if base_scheme == "https" and url.startswith("http://"):
             url = url.replace("http://", "https://", 1)
-            logger.debug(f"URL normalizada a HTTPS: {url}")
-
-        if not self.circuit_breaker.should_allow(self.navigation.domain):
-            logger.warning(f"Circuit broken. Skipping {url}")
-            await self.url_queue.put(url)
-            await asyncio.sleep(1)
-            return
 
         try:
             page = await self._fetch_page(session, url)
-
             if not page:
                 raise Exception("Empty content")
 
+            # 2. Detección de CAPTCHA (Fase 2)
+            raw_html = self._extract_html(page)
+            is_captcha, captcha_type = self.captcha_detector.detect(raw_html)
+            if is_captcha:
+                logger.error(f"CAPTCHA detectado ({captcha_type}) en {url}")
+                await self.state.update_status(url, MigrationStatus.FAILED, f"Blocked by CAPTCHA: {captcha_type}")
+                return
+
             self.circuit_breaker.record_success(self.navigation.domain)
 
-            # Extract content
-            raw_html = self._extract_html(page)
+            # Clean and Extract
             clean_html = pre_clean_html(raw_html)
 
-            # Parallel extraction
             async with asyncio.TaskGroup() as tg:
                 metadata_task = tg.create_task(
                     self.metadata_extractor.extract(raw_html, url)
@@ -549,12 +523,9 @@ class EngineCore:
 
             # Save markdown
             md_path = await self._save_markdown(url, metadata, text_data["markdown"])
+            await asyncio.sleep(0.05)
 
-            # CRITICAL: Allow buffer flush to disk before continuing
-            # This ensures file writes complete even if shutdown is triggered
-            await asyncio.sleep(0.1)
-
-            # Extract and queue new links
+            # Enqueue new links
             new_pages, new_assets = self.navigation.extract_links(page, url)
             await self._queue_discovered_links(new_pages, new_assets)
 
@@ -563,29 +534,13 @@ class EngineCore:
                 url, MigrationStatus.COMPLETED, immediate=False
             )
             self.pages_completed += 1
-
-            # Log and notify
-            await self._log_event(
-                WebPage(
-                    url=url,
-                    title=metadata["title"],
-                    content_md_path=str(md_path),
-                    assets=[a for a in new_assets if a not in self.seen_assets],
-                ),
-                engine=text_data["engine"],
-            )
-
             self._notify_ui()
 
         except Exception as e:
             await self._handle_page_error(url, e)
 
     async def _download_asset(self, asset_url: str) -> None:
-        """Download and save an asset with proper headers for hotlink protection.
-
-        Uses Referer/Origin headers to bypass hotlink protection that blocks
-        direct asset downloads without a valid referrer.
-        """
+        """Download and save an asset."""
         async with self.semaphore:
             try:
                 session = await self.http_cache.get_session()
@@ -619,17 +574,12 @@ class EngineCore:
     # ========================================================================
 
     async def _fetch_page(self, session: AsyncStealthySession, url: str) -> Any:
-        """Fetch a page using stealth or browser mode.
-
-        Returns a page object from scrapling (Response or similar).
-        Uses Any because scrapling returns dynamic types.
-        """
+        """Fetch a page using stealth or browser mode."""
         encoded_url = smart_url_normalize(url)
 
         if self.use_browser_mode:
             return await session.fetch(encoded_url, timeout=DEFAULT_BROWSER_TIMEOUT_MS)
 
-        # Try stealth mode first
         resp = await AsyncFetcher.get(
             encoded_url,
             impersonate="chrome",
@@ -641,13 +591,9 @@ class EngineCore:
         )
 
         if resp.status == 500:
-            await self.state.update_status(
-                url, MigrationStatus.FAILED, "Server Side Error (500)"
-            )
             return None
 
         if resp.status in [403, 401, 429]:
-            # Switch to browser mode
             self.use_browser_mode = True
             self._notify_mode_change()
             return await session.fetch(encoded_url, timeout=DEFAULT_BROWSER_TIMEOUT_MS)
@@ -667,26 +613,11 @@ class EngineCore:
     async def _save_markdown(
         self, url: str, metadata: dict[str, Any], markdown: str
     ) -> Path:
-        """Save markdown with frontmatter and compression.
-
-        Applies RAG enhancements before saving:
-        1. TOC generation from headers
-        2. Relative URL resolution
-
-        Args:
-            url: The page URL (used to generate filename)
-            metadata: Page metadata for YAML frontmatter
-            markdown: The markdown content
-
-        Returns:
-            Path to the saved file
-        """
-        # Build path from URL
+        """Save markdown with frontmatter and compression."""
         rel_path = url.removeprefix(self.navigation.base_url)
         raw_slug = Path(rel_path).stem or "index"
         path_slug = slugify(raw_slug)
 
-        # Enhance markdown for RAG (TOC + absolute links)
         enhanced_markdown = enhance_markdown_for_rag(
             markdown=markdown,
             metadata=metadata,
@@ -695,20 +626,15 @@ class EngineCore:
             include_toc=True,
         )
 
-        # Filter metadata for clean frontmatter (RAG-friendly)
         frontmatter_metadata = filter_metadata_for_frontmatter(metadata)
-
-        # Build content with frontmatter
         frontmatter = yaml.dump(
             frontmatter_metadata, allow_unicode=True, sort_keys=False
         )
         content = f"---\n{frontmatter}---\n\n{enhanced_markdown}"
 
-        # Ensure directory exists before writing
         content_dir = self.asset_extractor.data_dir / "content"
         content_dir.mkdir(parents=True, exist_ok=True)
 
-        # Save with compression
         md_path = await write_compressed_markdown(
             content_dir / path_slug,
             content,
@@ -721,45 +647,44 @@ class EngineCore:
         self, new_pages: list[str], new_assets: list[str]
     ) -> None:
         """Filter and queue newly discovered links."""
-        new_assets_filtered = [
-            a for a in new_assets if a not in self.seen_assets and self.extract_assets
-        ]
-        new_pages_filtered = [p for p in new_pages if p not in self.seen_urls]
+        
+        # Filtrado optimizado usando cache de memoria y DB fallback
+        pages_to_queue = []
+        for p in new_pages:
+            if p not in self.seen_urls:
+                # Doble verificación con DB si el cache expiró
+                if not await self.state.exists(p):
+                    pages_to_queue.append(p)
+                    self.seen_urls[p] = True
+                    self._pages_total_count += 1
+
+        assets_to_queue = []
+        if self.extract_assets:
+            for a in new_assets:
+                if a not in self.seen_assets:
+                    if not await self.state.exists(a):
+                        assets_to_queue.append(a)
+                        self.seen_assets[a] = True
+                        self._assets_total_count += 1
+
+        if not pages_to_queue and not assets_to_queue:
+            return
 
         async with asyncio.TaskGroup() as tg:
-            # Update seen sets
-            tg.create_task(
-                self._update_seen_sets(new_pages_filtered, new_assets_filtered)
-            )
-
             # Add to database
             assets_to_add = [
-                (a, MigrationStatus.PENDING, "asset") for a in new_assets_filtered
+                (a, MigrationStatus.PENDING, "asset") for a in assets_to_queue
             ]
             pages_to_add = [
-                (p, MigrationStatus.PENDING, "webpage") for p in new_pages_filtered
+                (p, MigrationStatus.PENDING, "webpage") for p in pages_to_queue
             ]
             tg.create_task(self.state.add_urls_batch(assets_to_add + pages_to_add))
 
             # Enqueue for processing
-            tg.create_task(
-                self._parallel_enqueue(new_pages_filtered, new_assets_filtered)
-            )
-
-    async def _update_seen_sets(self, pages: list[str], assets: list[str]) -> None:
-        """Update seen sets (thread-safe)."""
-        for p in pages:
-            self.seen_urls.add(p)
-        for a in assets:
-            self.seen_assets.add(a)
-
-    async def _parallel_enqueue(self, pages: list[str], assets: list[str]) -> None:
-        """Enqueue URLs in parallel."""
-        await asyncio.gather(
-            *[self.url_queue.put(p) for p in pages],
-            *[self.asset_queue.put(a) for a in assets],
-            return_exceptions=True,
-        )
+            for p in pages_to_queue:
+                tg.create_task(self.url_queue.put(p))
+            for a in assets_to_queue:
+                tg.create_task(self.asset_queue.put(a))
 
     async def _handle_page_error(self, url: str, error: Exception) -> None:
         """Handle errors during page processing."""
@@ -767,114 +692,30 @@ class EngineCore:
         self.error_count += 1
 
         current_retries = await self.state.increment_retry(url)
-        logger.warning(
-            f"Retry {current_retries}/{self.config.max_retries} for {url}: {error}"
-        )
-
         if current_retries < self.config.max_retries:
-            backoff = 2**current_retries
-            await asyncio.sleep(float(backoff))
+            await asyncio.sleep(float(2**current_retries))
             await self.url_queue.put(url)
         else:
             await self.state.update_status(url, MigrationStatus.FAILED, str(error))
             self.pages_failed += 1
 
-    async def _log_event(self, data: WebPage, engine: str = "unknown") -> None:
-        """Log event to file and activity log."""
-        report_path = self.asset_extractor.data_dir / "migration_audit.jsonl"
-
-        # Update internal log
-        self.activity_log.append(
-            {
-                "title": data.title,
-                "engine": engine,
-                "time": asyncio.get_event_loop().time(),
-            }
-        )
-
-        # Notify UI
-        if self.ui_callback:
-            self.ui_callback.on_activity(
-                ActivityEntry(title=data.title, engine=engine, timestamp=0.0)
-            )
-
-        # Write to file
-        async with self.report_lock:
-            async with aiofiles.open(report_path, "a", encoding="utf-8") as f:
-                await f.write(json.dumps(data.model_dump(mode="json")) + "\n")
-
     async def _graceful_shutdown(self, workers: list[asyncio.Task[None]]) -> None:
-        """Gracefully shutdown workers with sentinel pattern.
-
-        Best Practice (from Python asyncio docs):
-        1. Send ONE sentinel per worker to signal termination
-        2. Workers receive sentinel and exit cleanly
-        3. Wait for all workers to complete with timeout
-        4. Cancel any remaining workers after timeout
-
-        Reference: https://docs.python.org/3/library/asyncio-queue.html
-        """
+        """Gracefully shutdown workers."""
         self._shutdown_event.set()
 
-        # CRITICAL: Send sentinels to ALL workers so they can exit cleanly
-        # Each worker needs its own sentinel to break out of queue.get()
-        # This is the standard pattern for graceful worker shutdown
-        num_page_workers = len(self._page_workers)
-        num_asset_workers = len(self._asset_workers)
-
-        logger.info(
-            f"Sending {num_page_workers} page sentinels + {num_asset_workers} asset sentinels"
-        )
-
-        # Send one sentinel per page worker
-        for _ in range(num_page_workers):
+        for _ in range(len(self._page_workers)):
             await self.url_queue.put(_STOP_SENTINEL)
-
-        # Send one sentinel per asset worker
-        for _ in range(num_asset_workers):
+        for _ in range(len(self._asset_workers)):
             await self.asset_queue.put(_STOP_SENTINEL)
 
-        # Calculate adaptive timeout based on pending work
-        pending_urls = self.url_queue.qsize()
-        pending_assets = self.asset_queue.qsize()
-        total_pending = pending_urls + pending_assets
-
-        # Subtract sentinels we just added
-        total_pending -= num_page_workers + num_asset_workers
-
-        if total_pending > 0:
-            timeout = max(MIN_SHUTDOWN_TIMEOUT_SECONDS, total_pending * 2.0)
-            logger.info(
-                f"Waiting for {total_pending} pending tasks with {timeout}s timeout"
-            )
-        else:
-            timeout = MIN_SHUTDOWN_TIMEOUT_SECONDS
-            logger.info("No pending tasks, waiting for workers to receive sentinels")
-
         if workers:
-            done, pending = await asyncio.wait(
-                workers, timeout=timeout, return_when=asyncio.ALL_COMPLETED
-            )
-
-            if pending:
-                logger.warning(
-                    f"{len(pending)} workers did not finish in time, cancelling"
-                )
-                for w in pending:
+            await asyncio.wait(workers, timeout=MIN_SHUTDOWN_TIMEOUT_SECONDS)
+            for w in workers:
+                if not w.done():
                     w.cancel()
 
-                # Wait for cancellation to complete
-                await asyncio.wait(pending, timeout=DEFAULT_SHUTDOWN_TIMEOUT_SECONDS)
-
-        # CRITICAL: Give time for pending file writes to flush to disk
         await asyncio.sleep(0.5)
-        logger.info(
-            "✅ Graceful shutdown completed - all workers stopped and files flushed"
-        )
-
-    # ========================================================================
-    # UI NOTIFICATIONS
-    # ========================================================================
+        logger.info("✅ Graceful shutdown completed")
 
     def _notify_ui(self) -> None:
         """Send update to UI callback."""

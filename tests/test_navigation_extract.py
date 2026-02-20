@@ -1,4 +1,3 @@
-import pytest
 from unittest.mock import MagicMock
 from uif_scraper.navigation import NavigationService
 from uif_scraper.models import ScrapingScope

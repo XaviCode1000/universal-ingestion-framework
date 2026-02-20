@@ -5,7 +5,6 @@ need to be updated to use typer.testing.CliRunner.
 """
 
 import pytest
-from unittest.mock import patch
 from typer.testing import CliRunner
 
 from uif_scraper.cli import app
