@@ -105,7 +105,7 @@ class MetadataExtractor(IExtractor):
 
         # === HTML-TO-MARKDOWN EXTRACTION ===
         options = ConversionOptions(heading_style="atx")
-        config = MetadataConfig(
+        metadata_config = MetadataConfig(
             extract_document=True,  # Title, description, keywords, OG, Twitter
             extract_headers=True,  # H1-H6 para TOC
             extract_links=False,  # No necesitamos links aquí
@@ -114,17 +114,32 @@ class MetadataExtractor(IExtractor):
         )
 
         # Convertir y extraer metadata (no usamos el markdown aquí)
-        _, md_metadata = convert_with_metadata(content, options, config)
+        # Nota: metadata_config va como keyword argument
+        _, md_metadata = convert_with_metadata(
+            content, options=options, metadata_config=metadata_config
+        )
 
         # === EXTRAER METADATA DEL RESULTADO ===
-        doc_meta = md_metadata.get("document", {})
+        doc_meta = md_metadata.get("document", {}) or {}
 
-        # Título: OG > title tag > H1 > default
-        title = (
-            doc_meta.get("title")
-            or doc_meta.get("og_title")
-            or "Documento"
-        )
+        # === OPEN GRAPH (primero, para usar como fallback del título) ===
+        # html-to-markdown pone OG data en nested dict: document.open_graph
+        og_data = doc_meta.get("open_graph", {}) or {}
+        og_title = og_data.get("title") if isinstance(og_data, dict) else None
+        og_description = og_data.get("description") if isinstance(og_data, dict) else doc_meta.get("og_description")
+        og_image = og_data.get("image") if isinstance(og_data, dict) else doc_meta.get("og_image")
+        og_type = og_data.get("type") if isinstance(og_data, dict) else doc_meta.get("og_type")
+
+        # === TWITTER CARDS ===
+        # html-to-markdown pone Twitter data en nested dict: document.twitter_card
+        twitter_data = doc_meta.get("twitter_card", {}) or {}
+        twitter_card = twitter_data.get("card") if isinstance(twitter_data, dict) else doc_meta.get("twitter_card")
+        twitter_site = twitter_data.get("site") if isinstance(twitter_data, dict) else doc_meta.get("twitter_site")
+        twitter_title = twitter_data.get("title") if isinstance(twitter_data, dict) else doc_meta.get("twitter_title")
+
+        # === TÍTULO ===
+        # Prioridad: title tag > OG title > "Documento"
+        title = doc_meta.get("title") or og_title or "Documento"
         if title:
             title = str(title).split("|")[0].split(" - ")[0].strip()
 
@@ -146,19 +161,6 @@ class MetadataExtractor(IExtractor):
             keywords = [k.strip() for k in keywords_raw.split(",") if k.strip()]
         else:
             keywords = list(keywords_raw) if keywords_raw else []
-
-        # === OPEN GRAPH ===
-        og_data = doc_meta.get("open_graph", {})
-        og_title = og_data.get("title") or doc_meta.get("og_title")
-        og_description = og_data.get("description") or doc_meta.get("og_description")
-        og_image = og_data.get("image") or doc_meta.get("og_image")
-        og_type = og_data.get("type") or doc_meta.get("og_type")
-
-        # === TWITTER CARDS ===
-        twitter_data = doc_meta.get("twitter_card", {})
-        twitter_card = twitter_data.get("card") or doc_meta.get("twitter_card")
-        twitter_site = twitter_data.get("site") or doc_meta.get("twitter_site")
-        twitter_title = twitter_data.get("title") or doc_meta.get("twitter_title")
 
         # === STRUCTURED DATA (JSON-LD) ===
         structured_data = md_metadata.get("structured_data", [])
