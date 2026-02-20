@@ -16,6 +16,7 @@ from typing import TYPE_CHECKING
 
 from textual.app import ComposeResult
 from textual.containers import Horizontal, Vertical
+from textual.message import Message
 from textual.screen import Screen
 from textual.widgets import Footer, Header
 
@@ -30,7 +31,7 @@ if TYPE_CHECKING:
     )
 
 
-class DashboardScreen(Screen):
+class DashboardScreen(Screen[Message]):
     """Pantalla principal del dashboard.
 
     Muestra:
@@ -109,23 +110,39 @@ class DashboardScreen(Screen):
                 self._update_state(event)
 
     def _update_state(self, event: "StateChange") -> None:
-        """Actualiza el estado del header."""
+        """Actualiza el estado del header y widgets."""
         state_colors = {
             "starting": "yellow",
             "running": "green",
             "paused": "yellow",
+            "mission_complete": "green",  # Éxito!
+            "finalizing": "cyan",  # Limpiando
             "stopping": "yellow",
             "stopped": "dim",
             "error": "red",
         }
+        state_icons = {
+            "starting": "⏳",
+            "running": "🚀",
+            "paused": "⏸",
+            "mission_complete": "✅",
+            "finalizing": "🔄",
+            "stopping": "⏹",
+            "stopped": "■",
+            "error": "✗",
+        }
         color = state_colors.get(event.state, "white")
+        icon = state_icons.get(event.state, "●")
         mode_icon = "🌐" if event.mode == "browser" else "🥷"
 
         # Actualizar subtítulo de la app (el header muestra app.sub_title)
         if self.app:
             self.app.sub_title = (
-                f"[{color}]● {event.state.upper()}[/] | {mode_icon} {event.mode}"
+                f"[{color}]{icon} {event.state.upper()}[/] | {mode_icon} {event.mode}"
             )
+
+        # Actualizar el widget de URL según el estado
+        self._current_url.update_from_state_change(event)
 
     def set_processing_url(self, url: str, worker_id: int, engine: str) -> None:
         """Setea la URL que se está procesando.

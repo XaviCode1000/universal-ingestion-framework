@@ -137,9 +137,11 @@ class EngineCore:
         navigation_service: NavigationService,
         reporter_service: ReporterService,
         extract_assets: bool = True,
+        force: bool = False,
     ) -> None:
         self.config = config
         self.extract_assets = extract_assets
+        self.force = force  # Force re-scrape ignoring history
         self.state = state
         self.text_extractor = text_extractor
         self.metadata_extractor = metadata_extractor
@@ -182,9 +184,7 @@ class EngineCore:
         self._shutdown_event = asyncio.Event()
         self._pause_event = asyncio.Event()  # Para pause/resume real
         self._pause_event.set()  # Inicia despausado
-        self._engine_state: str = (
-            "starting"  # starting, running, paused, stopping, stopped, error
-        )
+        self._engine_state: str = "starting"  # starting, running, paused, mission_complete, finalizing, stopping, stopped, error
         self._page_workers: list[asyncio.Task[None]] = []
         self._asset_workers: list[asyncio.Task[None]] = []
         self.ui_callback: UICallback | None = None
@@ -224,6 +224,17 @@ class EngineCore:
         ):
             logger.error(f"Mission lock already held for {self.navigation.domain}")
             raise RuntimeError("Mission lock already held")
+
+        # Force mode: Reset domain state to allow re-scraping
+        if self.force:
+            deleted_count = await self.state.reset_domain_state()
+            logger.warning(
+                f"⚠️ FORCE MODE: History cleared for {self.navigation.domain} "
+                f"({deleted_count} records deleted)"
+            )
+            # Clear in-memory cache
+            self.seen_urls.clear()
+            self.seen_assets.clear()
 
         await self.state.start_batch_processor()
 
@@ -285,6 +296,9 @@ class EngineCore:
 
             all_workers = self._page_workers + self._asset_workers
 
+            # Trackear si la misión completó naturalmente (cola vacía)
+            mission_naturally_completed = False
+
             try:
                 checks = 0
                 while not self._shutdown_event.is_set():
@@ -299,10 +313,26 @@ class EngineCore:
                     if (self.url_queue.qsize() + self.asset_queue.qsize()) == 0:
                         checks += 1
                         if checks >= 5:
+                            # Cola vacía por 5 ciclos = misión completada naturalmente
+                            mission_naturally_completed = True
+                            self._notify_state_change(
+                                "mission_complete", reason="queue_exhausted"
+                            )
                             break
                     else:
                         checks = 0
                     await asyncio.sleep(0.5)
+
+                # FORZAR update UI antes del join() para evitar race condition
+                # El Estado oficial pasa a ser "finalizing" mientras hace cleanup
+                if mission_naturally_completed:
+                    self._notify_state_change(
+                        "finalizing", reason="cleanup_in_progress"
+                    )
+
+                # Asegurar que la UI процессó el evento antes de bloquear
+                await asyncio.sleep(0.05)
+                self._notify_ui()
 
                 await self.url_queue.join()
                 if self.extract_assets:
@@ -497,8 +527,11 @@ class EngineCore:
     async def _save_markdown(
         self, url: str, metadata: dict[str, Any], markdown: str
     ) -> Path:
+        # FIX P0: Usar rel_path completo para evitar colisiones
+        # Ej: blog/contact vs shop/contact ahora son archivos distintos
         rel_path = url.removeprefix(self.navigation.base_url)
-        path_slug = slugify(Path(rel_path).stem or "index")
+        clean_path = rel_path.strip("/")  # Limpiar slashes extra
+        path_slug = slugify(clean_path) if clean_path else "index"
 
         enhanced = enhance_markdown_for_rag(
             markdown=markdown, metadata=metadata, base_url=url, include_toc=True
@@ -588,6 +621,23 @@ class EngineCore:
             self.ui_callback.on_circuit_change(
                 self.circuit_breaker.get_state(self.navigation.domain)
             )
+
+    def _force_ui_update(self, state: str, reason: str | None = None) -> None:
+        """Fuerza una actualización de UI garantizada antes de bloqueos.
+
+        Este método asegura que el evento de cambio de estado sea enviado
+        Y PROCESADO por la UI antes de continuar (evita race conditions).
+
+        Args:
+            state: Estado a notificar
+            reason: Razón del cambio
+        """
+        # Primero notificar el cambio de estado
+        self._notify_state_change(state, reason)
+
+        # Forzar callback UI inmediatamente
+        if self.ui_callback:
+            self.ui_callback.on_progress(self.get_stats())
 
     def _notify_mode_change(self) -> None:
         if self.ui_callback:

@@ -166,17 +166,35 @@ class TextualUICallback(UICallback):
         """Notifica cambio de estado del engine.
 
         Args:
-            state: Nuevo estado (starting, running, paused, stopping, stopped, error)
+            state: Nuevo estado (starting, running, paused, mission_complete, finalizing, stopping, stopped, error)
             mode: Modo actual (stealth, browser)
             previous_state: Estado anterior
             reason: Razón del cambio
         """
         # Validar y castear tipos
-        valid_states = ("starting", "running", "paused", "stopping", "stopped", "error")
+        valid_states = (
+            "starting",
+            "running",
+            "paused",
+            "mission_complete",
+            "finalizing",
+            "stopping",
+            "stopped",
+            "error",
+        )
         valid_modes = ("stealth", "browser")
 
         state_literal = cast(
-            Literal["starting", "running", "paused", "stopping", "stopped", "error"],
+            Literal[
+                "starting",
+                "running",
+                "paused",
+                "mission_complete",
+                "finalizing",
+                "stopping",
+                "stopped",
+                "error",
+            ],
             state if state in valid_states else "running",
         )
         mode_literal = cast(

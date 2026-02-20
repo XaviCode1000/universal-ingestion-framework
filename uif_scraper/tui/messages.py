@@ -8,7 +8,7 @@ Todos los modelos son inmutables (frozen=True) para thread-safety.
 """
 
 from datetime import datetime
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
@@ -109,10 +109,21 @@ class SystemStatus(TUIEvent):
 class StateChange(TUIEvent):
     """Cambio de estado del engine."""
 
-    state: Literal["starting", "running", "paused", "stopping", "stopped", "error"]
+    state: Literal[
+        "starting",
+        "running",
+        "paused",
+        "mission_complete",
+        "finalizing",
+        "stopping",
+        "stopped",
+        "error",
+    ]
     mode: Literal["stealth", "browser"]
     previous_state: str | None = None
-    reason: str | None = None  # Por qué cambió (user_request, error, completed)
+    reason: str | None = (
+        None  # Por qué cambió (user_request, error, completed, queue_exhausted)
+    )
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -150,7 +161,7 @@ class EngineCommand(BaseModel):
         "set_workers",
         "set_mode",
     ]
-    payload: dict = Field(default_factory=dict)
+    payload: dict[str, Any] = Field(default_factory=dict)
 
 
 # ═══════════════════════════════════════════════════════════════════════════════

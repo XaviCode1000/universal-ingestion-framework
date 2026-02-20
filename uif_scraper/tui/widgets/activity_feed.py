@@ -6,11 +6,12 @@ Muestra las últimas actividades del scraper con:
 - Throttling de 10 updates/segundo máximo
 - Render eficiente con widgets pre-creados
 - Timestamps relativos ("2s ago")
+- Phase-specific coloring para Discovery/Extraction/Writing/RateLimit
 """
 
 from collections import deque
 from time import time
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Literal, cast
 
 from textual.app import ComposeResult
 from textual.containers import Vertical, VerticalScroll
@@ -22,6 +23,24 @@ if TYPE_CHECKING:
     from uif_scraper.tui.messages import ActivityEvent
 
 
+# Phase-specific colors para diferenciación visual
+PHASE_COLORS: dict[str, str] = {
+    "discovery": "cyan",  # #89dceb - Encontrando nuevos links
+    "extraction": "green",  # #a6e3a1 - Fetch & parse de página
+    "writing": "magenta",  # #cba6f7 - Escribiendo a disco
+    "rate_limit": "yellow",  # #f9e2af - Esperando throttling
+    "idle": "dim",  # Sin actividad
+}
+
+PHASE_ICONS: dict[str, str] = {
+    "discovery": "🔍",
+    "extraction": "⬇️",
+    "writing": "💾",
+    "rate_limit": "⏳",
+    "idle": "💤",
+}
+
+
 class ActivityFeed(Vertical):
     """Feed de actividad con buffer circular y throttling inteligente.
 
@@ -30,6 +49,7 @@ class ActivityFeed(Vertical):
     - Máximo 10 actualizaciones/segundo (throttling)
     - 8 items visibles con scroll
     - Timestamps relativos actualizados
+    - Phase-specific coloring para UX mejorada
     """
 
     # CSS movido a mocha.tcss para usar variables
@@ -57,6 +77,7 @@ class ActivityFeed(Vertical):
     # ═══════════════════════════════════════════════════════════════════════════
 
     activities: reactive[list[dict[str, Any]]] = reactive(list, init=False)
+    current_phase: reactive[str] = reactive("idle", init=False)
 
     def __init__(self, **kwargs: Any) -> None:
         super().__init__(**kwargs)
@@ -67,6 +88,10 @@ class ActivityFeed(Vertical):
         self._pending_render: bool = False
         # Cache de timestamps para actualización
         self._timestamps: dict[int, float] = {}
+        # Fase actual para coloración
+        self._current_phase: Literal[
+            "discovery", "extraction", "writing", "rate_limit", "idle"
+        ] = "idle"
 
     def compose(self) -> ComposeResult:
         """Compone el layout del feed."""
@@ -90,6 +115,8 @@ class ActivityFeed(Vertical):
         status: str = "success",
         elapsed_ms: float = 0.0,
         size_bytes: int = 0,
+        phase: Literal["discovery", "extraction", "writing", "rate_limit", "idle"]
+        | None = None,
     ) -> None:
         """Agrega una actividad al feed con throttling.
 
@@ -100,8 +127,12 @@ class ActivityFeed(Vertical):
             status: success, warning, o error
             elapsed_ms: Tiempo de procesamiento en ms
             size_bytes: Tamaño del contenido en bytes
+            phase: Fase actual del scraping (discovery/extraction/writing/rate_limit)
         """
         now = time()
+
+        # Usar fase actual si no se específica
+        current_phase = phase or self._current_phase
 
         # Agregar al buffer circular
         activity = {
@@ -112,6 +143,7 @@ class ActivityFeed(Vertical):
             "elapsed_ms": elapsed_ms,
             "size_bytes": size_bytes,
             "timestamp": now,
+            "phase": current_phase,
         }
         self._buffer.appendleft(activity)
 
@@ -124,6 +156,18 @@ class ActivityFeed(Vertical):
         else:
             self._pending_render = True
 
+    def set_phase(
+        self,
+        phase: Literal["discovery", "extraction", "writing", "rate_limit", "idle"],
+    ) -> None:
+        """Establece la fase actual para coloración del feed.
+
+        Args:
+            phase: Fase actual del scraping
+        """
+        self._current_phase = phase
+        self.current_phase = phase
+
     def _render_visible(self) -> None:
         """Renderiza los items visibles usando widgets cacheados."""
         for i, widget in enumerate(self._widgets):
@@ -134,7 +178,12 @@ class ActivityFeed(Vertical):
                 title = activity["title"]
                 status = activity["status"]
 
-                # Color del engine según tipo
+                # Phase-specific coloring para la fase actual
+                phase = activity.get("phase", "idle")
+                phase_color = PHASE_COLORS.get(phase, "dim")
+                phase_icon = PHASE_ICONS.get(phase, "")
+
+                # Color del engine según tipo (subordinado a fase)
                 engine_colors = {
                     "trafilatura": "green",
                     "html-to-markdown": "green",
@@ -149,11 +198,17 @@ class ActivityFeed(Vertical):
                     "✓" if status == "success" else "⚠" if status == "warning" else "✗"
                 )
 
-                # Formatear línea
-                content = (
-                    f"{status_icon} [bold]{title}[/]\n"
-                    f"   [{engine_color}]{engine}[/] • {time_ago}"
-                )
+                # Formatear línea con phase icon
+                if phase_icon:
+                    content = (
+                        f"{phase_icon} {status_icon} [bold]{title}[/]\n"
+                        f"   [{phase_color}]{phase}[/] • [{engine_color}]{engine}[/] • {time_ago}"
+                    )
+                else:
+                    content = (
+                        f"{status_icon} [bold]{title}[/]\n"
+                        f"   [{engine_color}]{engine}[/] • {time_ago}"
+                    )
                 widget.update(content)
                 widget.display = True
             else:
@@ -205,5 +260,24 @@ class ActivityFeed(Vertical):
             size_bytes=event.size_bytes,
         )
 
+    def set_phase_from_activity(self, activity_type: str) -> None:
+        """Establece la fase basada en el tipo de actividad.
 
-__all__ = ["ActivityFeed"]
+        Args:
+            activity_type: Tipo de actividad (extract_links, download_asset, etc.)
+        """
+        phase_mapping: dict[str, str] = {
+            "extract_links": "discovery",
+            "download_asset": "writing",
+            "process_page": "extraction",
+            "throttle": "rate_limit",
+        }
+        raw_phase = phase_mapping.get(activity_type, "idle")
+        phase = cast(
+            Literal["discovery", "extraction", "writing", "rate_limit", "idle"],
+            raw_phase,
+        )
+        self.set_phase(phase)
+
+
+__all__ = ["ActivityFeed", "PHASE_COLORS", "PHASE_ICONS"]
