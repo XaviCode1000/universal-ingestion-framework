@@ -720,3 +720,64 @@ class EngineCore:
                     }
                 )
         return errors
+
+    def get_config(self) -> dict[str, Any]:
+        """Retorna la configuración actual del engine.
+
+        Returns:
+            Diccionario con: workers, request_delay, timeout, mode
+        """
+        return {
+            "workers": self.semaphore._value
+            if hasattr(self.semaphore, "_value")
+            else self.config.default_workers,
+            "request_delay": int(
+                self.config.request_delay * 1000
+            ),  # Convertir de segundos a ms
+            "timeout": self.config.timeout_seconds,
+            "mode": "browser" if self.use_browser_mode else "stealth",
+        }
+
+    def update_config(
+        self,
+        workers: int | None = None,
+        request_delay: int | None = None,
+        timeout: int | None = None,
+        mode: str | None = None,
+        scope: str | None = None,
+    ) -> dict[str, Any]:
+        """Actualiza la configuración del engine en runtime.
+
+        Args:
+            workers: Nuevo número de workers
+            request_delay: Nuevo delay entre requests (ms)
+            timeout: Nuevo timeout (segundos)
+            mode: Modo ('stealth' o 'browser')
+            scope: Alcance (no implementado aún, pero acepatdo por compatibilidad)
+
+        Returns:
+            Diccionario con la configuración actualizada
+        """
+        if workers is not None and 1 <= workers <= 10:
+            # Recrear el semáforo con el nuevo valor
+            self.semaphore = asyncio.Semaphore(workers)
+            logger.info(f"Workers updated to {workers}")
+
+        if request_delay is not None and request_delay >= 0:
+            self.config.request_delay = (
+                request_delay / 1000.0
+            )  # Convertir de ms a segundos
+            logger.info(f"Request delay updated to {request_delay}ms")
+
+        if timeout is not None and timeout >= 5:
+            self.config.timeout_seconds = timeout
+            logger.info(f"Timeout updated to {timeout}s")
+
+        if mode is not None:
+            self.use_browser_mode = mode == "browser"
+            logger.info(f"Mode updated to {mode}")
+
+        # scope no está implementado en la configuración actual
+        _ = scope  # Ignorar por compatibilidad
+
+        return self.get_config()
