@@ -36,9 +36,7 @@ from typing import Any
 import aiofiles
 from pydantic import BaseModel, Field, ValidationError
 
-from uif_scraper.logger import get_logger
-
-logger = get_logger(__name__)
+from loguru import logger
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -206,7 +204,7 @@ class DataWriter:
         now = time.time()
 
         # Escribir items válidos
-        if self._buffer:
+        if self._buffer and self._main_file:
             await self._write_atomic(
                 self._main_file,
                 self._buffer,
@@ -227,7 +225,7 @@ class DataWriter:
                 self._on_flush(event)
 
         # Escribir items fallidos
-        if self._failed_buffer:
+        if self._failed_buffer and self._failed_file:
             await self._write_atomic(
                 self._failed_file,
                 self._failed_buffer,
@@ -303,10 +301,21 @@ class DataWriter:
             except asyncio.CancelledError:
                 pass
 
-        # Flush final
-        await self.flush()
+        # Flush final (forzar aunque no esté lleno)
+        await self._force_flush()
 
         logger.info(f"DataWriter closed. Total written: {self._total_written}")
+
+    async def _force_flush(self) -> None:
+        """Fuerza el flush de todo el buffer sin condiciones."""
+        if self._buffer:
+            await self._write_atomic(self._main_file, self._buffer)
+            self._total_written += len(self._buffer)
+            self._buffer.clear()
+
+        if self._failed_buffer:
+            await self._write_atomic(self._failed_file, self._failed_buffer)
+            self._failed_buffer.clear()
 
     @property
     def stats(self) -> dict[str, Any]:

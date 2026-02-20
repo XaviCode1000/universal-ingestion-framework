@@ -470,6 +470,18 @@ class EngineCore:
 
             await self._save_markdown(url, metadata, text_data["markdown"])
 
+            # Enviar a la cola de persistencia
+            await self.queue_item_for_persistence(
+                {
+                    "url": url,
+                    "title": metadata.get("title"),
+                    "content": text_data["markdown"],
+                    "content_type": "text",
+                    "domain": self.navigation.domain,
+                    "metadata": metadata,
+                }
+            )
+
             new_pages, new_assets = self.navigation.extract_links(page, url)
             await self._queue_discovered_links(new_pages, new_assets)
 
@@ -632,20 +644,36 @@ class EngineCore:
         for _ in range(len(self._asset_workers)):
             await self.asset_queue.put(_STOP_SENTINEL)
 
-        # Signal persistence worker to stop
-        await self.data_queue.put(None)  # type: ignore[arg-type]
-
         if workers:
             await asyncio.wait(workers, timeout=MIN_SHUTDOWN_TIMEOUT_SECONDS)
             for w in workers:
                 if not w.done():
                     w.cancel()
 
-        # Wait for persistence worker to finish
-        if self._persistence_worker_task:
-            await self._persistence_worker_task
+        # === PERSISTENCE DRAINAGE ===
+        # 1. Send stop signal (None) to persistence queue
+        await self.data_queue.put(None)  # type: ignore[arg-type]
 
-        # Close data writer
+        # 2. Wait for all items to be processed (queue.join())
+        try:
+            await asyncio.wait_for(
+                self.data_queue.join(),
+                timeout=30.0,  # Max 30s for drainage
+            )
+        except asyncio.TimeoutError:
+            logger.warning("Persistence queue drainage timed out")
+
+        # 3. Wait for persistence worker to finish
+        if self._persistence_worker_task:
+            try:
+                await asyncio.wait_for(
+                    self._persistence_worker_task,
+                    timeout=10.0,
+                )
+            except asyncio.TimeoutError:
+                logger.warning("Persistence worker did not finish in time")
+
+        # 4. Force final flush (captura cualquier item restante)
         if self._data_writer:
             await self._data_writer.close()
 
@@ -1000,6 +1028,8 @@ class EngineCore:
 
                 # None es señal de shutdown
                 if item is None:
+                    # Importante: marcar como done para que join() funcione
+                    self.data_queue.task_done()
                     break
 
                 # Escribir item
