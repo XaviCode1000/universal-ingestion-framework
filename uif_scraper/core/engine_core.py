@@ -721,6 +721,56 @@ class EngineCore:
                 )
         return errors
 
+    def get_logs(self, level: str = "ALL", limit: int = 100) -> list[dict[str, Any]]:
+        """Retorna los logs del engine.
+
+        Args:
+            level: Filtrar por nivel (DEBUG, INFO, WARNING, ERROR, ALL)
+            limit: Número máximo de entradas a retornar
+
+        Returns:
+            Lista de diccionarios con: timestamp, level, message, source
+        """
+        logs = []
+        level_upper = level.upper()
+
+        # Usar activity_log como fuente de logs
+        for entry in self.activity_log[-limit:]:
+            # Determinar el nivel basado en el status
+            status = entry.get("status", "info")
+            if status == "error":
+                log_level = "ERROR"
+            elif status == "warning":
+                log_level = "WARNING"
+            else:
+                log_level = "INFO"
+
+            # Filtrar por nivel si no es ALL
+            if level_upper != "ALL" and log_level != level_upper:
+                continue
+
+            # Construir mensaje
+            url = entry.get("url", "")
+            message = (
+                entry.get("title", "")
+                or entry.get("error", "")
+                or entry.get("status", "")
+            )
+
+            if url:
+                message = f"{message}: {url}"
+
+            logs.append(
+                {
+                    "timestamp": entry.get("time", 0),
+                    "level": log_level,
+                    "message": message,
+                    "source": entry.get("engine", "engine"),
+                }
+            )
+
+        return logs
+
     def get_config(self) -> dict[str, Any]:
         """Retorna la configuración actual del engine.
 
