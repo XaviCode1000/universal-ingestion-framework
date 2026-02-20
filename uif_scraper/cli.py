@@ -29,6 +29,12 @@ from uif_scraper.infrastructure.network.resilient_transport import (
     create_resilient_transport,
 )
 
+# ✅ DETECCIÓN DE UVLOOP (después de todos los imports)
+# Esto permite usar el event loop de alto rendimiento si está disponible
+import importlib.util
+
+HAS_UVLOOP = importlib.util.find_spec("uvloop") is not None
+
 # Catppuccin-themed console
 console = Console()
 
@@ -114,17 +120,34 @@ def scrape(
     ),
 ) -> None:
     """🛸 Ejecutar misión de scraping con TUI moderna."""
-    asyncio.run(
-        _run_async(
-            url=url,
-            config_path=config_path,
-            scope=scope,
-            workers=workers,
-            only_text=only_text,
-            output_dir=output_dir,
-            setup=setup,
+    # ✅ INTEGRACIÓN DE UVLOOP
+    # Usar uvloop.run() para alto rendimiento si está disponible
+    if HAS_UVLOOP:
+        import uvloop as _uvloop
+
+        _uvloop.run(
+            _run_async(
+                url=url,
+                config_path=config_path,
+                scope=scope,
+                workers=workers,
+                only_text=only_text,
+                output_dir=output_dir,
+                setup=setup,
+            )
         )
-    )
+    else:
+        asyncio.run(
+            _run_async(
+                url=url,
+                config_path=config_path,
+                scope=scope,
+                workers=workers,
+                only_text=only_text,
+                output_dir=output_dir,
+                setup=setup,
+            )
+        )
 
 
 async def _run_async(
