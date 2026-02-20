@@ -1,107 +1,73 @@
 """UIF Dashboard App - Main Textual Application.
 
-This app runs the scraping engine (EngineCore) as a background worker
-using Textual's worker system. UI updates are received via TextualUICallback
-which translates EngineCore events to Textual messages.
+Arquitectura basada en Screens:
+    EngineCore → TUICallback → Events → UIFDashboardApp → DashboardScreen → Widgets
 
-Architecture:
-    EngineCore → TextualUICallback → Messages → UIFDashboardApp → Widgets
+La app maneja:
+- Navegación entre pantallas (Dashboard, Queue, Errors, Config, Logs)
+- Comunicación con EngineCore via callbacks
+- Estado global (paused, running, etc.)
 """
 
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable, Coroutine
 
 from textual import work
-from textual.app import App, ComposeResult
-from textual.containers import Container, Horizontal
-from textual.message import Message
-from textual.widgets import Footer, Header
+from textual.app import App
 from textual.worker import Worker
 
-from uif_scraper.tui.widgets.activity import ActivityPanel
-from uif_scraper.tui.widgets.header import MissionHeader
-from uif_scraper.tui.widgets.stats import StatsPanel
-from uif_scraper.tui.widgets.status import SystemStatus
+from uif_scraper.tui.messages import (
+    ActivityEvent,
+    ProgressUpdate,
+    StateChange,
+    SystemStatus,
+    TUIEvent,
+)
+from uif_scraper.tui.screens import (
+    ConfigScreen,
+    DashboardScreen,
+    ErrorScreen,
+    LogsScreen,
+    QueueScreen,
+)
 
 if TYPE_CHECKING:
     from textual.timer import Timer
 
 
-class EngineStarted(Message):
-    """Message sent when scraping engine starts."""
-
-    def __init__(self, url: str, scope: str, workers: int) -> None:
-        super().__init__()
-        self.url = url
-        self.scope = scope
-        self.workers = workers
-
-
-class EngineProgress(Message):
-    """Message sent with progress updates."""
-
-    def __init__(
-        self,
-        pages_completed: int,
-        pages_total: int,
-        assets_completed: int,
-        assets_total: int,
-        seen_urls: int,
-        seen_assets: int,
-    ) -> None:
-        super().__init__()
-        self.pages_completed = pages_completed
-        self.pages_total = pages_total
-        self.assets_completed = assets_completed
-        self.assets_total = assets_total
-        self.seen_urls = seen_urls
-        self.seen_assets = seen_assets
-
-
-class EngineActivity(Message):
-    """Message sent when a new activity occurs."""
-
-    def __init__(self, title: str, engine: str) -> None:
-        super().__init__()
-        self.title = title
-        self.engine = engine
-
-
-class EngineStatus(Message):
-    """Message sent with system status updates."""
-
-    def __init__(
-        self,
-        circuit_state: str,
-        queue_pending: int,
-        error_count: int,
-        browser_mode: bool,
-    ) -> None:
-        super().__init__()
-        self.circuit_state = circuit_state
-        self.queue_pending = queue_pending
-        self.error_count = error_count
-        self.browser_mode = browser_mode
-
-
 class UIFDashboardApp(App[None]):
     """Main TUI Dashboard for UIF Scraper.
 
-    This app runs the scraping engine as a background worker and
-    updates the UI through messages. Uses Textual's worker system
-    for proper lifecycle management.
+    Arquitectura basada en Screens con navegación via keybindings.
+    El engine corre como background worker y emite eventos tipados.
     """
+
+    TITLE = "🛸 UIF SCRAPER v3.0"
+    SUB_TITLE = "● IDLE"
 
     CSS_PATH = Path(__file__).parent / "styles" / "mocha.tcss"
 
     BINDINGS = [
+        # Globales
         ("ctrl+c", "quit", "Quit"),
+        ("q", "quit", "Quit"),
         ("p", "toggle_pause", "Pause"),
-        ("h", "show_help", "Help"),
+        ("?", "show_help", "Help"),
+        ("escape", "go_dashboard", "Dashboard"),
+        # Navegación
+        ("c", "push_screen('queue')", "Queue"),
+        ("e", "push_screen('errors')", "Errors"),
+        ("comma", "push_screen('config')", "Config"),
+        ("l", "push_screen('logs')", "Logs"),
     ]
 
-    # Reactive state
-    is_paused: bool = False
+    SCREENS = {
+        "dashboard": DashboardScreen,
+        "queue": QueueScreen,
+        "errors": ErrorScreen,
+        "config": ConfigScreen,
+        "logs": LogsScreen,
+    }
 
     def __init__(
         self,
@@ -116,172 +82,162 @@ class UIFDashboardApp(App[None]):
         self._scope = scope
         self._worker_count = worker_count
         self._engine_factory = engine_factory
+
+        # Estado
+        self._is_paused: bool = False
+        self._is_running: bool = False
+        self._engine_completed: bool = False
         self._update_timer: Timer | None = None
-        self._engine_completed: bool = False  # Track engine completion explicitly
 
-    def compose(self) -> ComposeResult:
-        """Compose the main layout."""
-        yield Header(show_clock=True)
-
-        with Container(id="main-container"):
-            # Mission Header
-            yield MissionHeader(id="mission-header")
-
-            # Main content area
-            with Horizontal(id="content-area"):
-                # Left: Stats
-                yield StatsPanel(id="stats-panel")
-
-                # Right: Activity
-                yield ActivityPanel(id="activity-panel")
-
-            # Bottom: System Status
-            yield SystemStatus(id="system-status")
-
-        yield Footer()
+        # Queue para comandos al engine (pause, resume, etc.)
+        self._command_handlers: dict[str, Callable] = {}
 
     def on_mount(self) -> None:
-        """Initialize on mount."""
-        # Set up periodic update timer for elapsed time
+        """Inicializa la app en mount."""
+        # Instalar pantalla principal
+        self.push_screen("dashboard")
+
+        # Timer para actualizaciones periódicas
         self._update_timer = self.set_interval(1.0, self._tick)
 
-        # Initialize header with mission info
-        header = self.query_one("#mission-header", MissionHeader)
-        header.mission_url = self._mission_url
-        header.mission_scope = self._scope
-        header.worker_count = self._worker_count
-
-        # Start engine as background worker if factory provided
+        # Iniciar engine si hay factory
         if self._engine_factory:
             self._run_engine_worker()
-            self.post_message(
-                EngineStarted(self._mission_url, self._scope, self._worker_count)
-            )
+
+    def _tick(self) -> None:
+        """Callback periódico para actualizaciones."""
+        pass  # Las pantallas manejan sus propios timers
+
+    # ═══════════════════════════════════════════════════════════════════════════
+    # ENGINE WORKER
+    # ═══════════════════════════════════════════════════════════════════════════
 
     @work(exclusive=True, name="engine_worker")
     async def _run_engine_worker(self) -> None:
-        """Run the scraping engine as a Textual worker.
-
-        This method is decorated with @work to integrate with Textual's
-        worker lifecycle management. When the engine completes, it sets
-        _engine_completed flag and schedules app exit with safety timeout.
-        """
+        """Run the scraping engine as a Textual worker."""
         if self._engine_factory:
             try:
+                self._is_running = True
                 await self._engine_factory()
-                # CRITICAL: Mark engine as completed BEFORE scheduling exit
-                # This ensures we detect completion even if worker state doesn't propagate
                 self._engine_completed = True
             except Exception:
-                # Let on_worker_state_changed handle errors
                 raise
             finally:
-                # SAFETY: Always schedule exit after engine finishes (success or error)
-                # This prevents the app from hanging if worker state doesn't propagate
+                self._is_running = False
                 self.call_later(self._safe_exit)
 
     def on_worker_state_changed(self, event: Worker.StateChanged) -> None:
-        """Handle worker state changes.
-
-        This is called when the engine worker changes state.
-        When it reaches SUCCESS or ERROR, we exit the app.
-        """
+        """Handle worker state changes."""
         from textual.worker import WorkerState
 
-        # Only handle our engine worker
         if event.worker.name != "engine_worker":
             return
 
         if event.state == WorkerState.SUCCESS:
             self.notify(
-                "Scraping completed successfully!", title="Done", severity="information"
+                "Scraping completed successfully!",
+                title="Done",
+                severity="information",
             )
             self.call_later(self.exit)
         elif event.state == WorkerState.ERROR:
             self.notify(
-                "Scraping failed with an error.", title="Error", severity="error"
+                "Scraping failed with an error.",
+                title="Error",
+                severity="error",
             )
             self.call_later(self.exit)
         elif event.state == WorkerState.CANCELLED:
-            # User cancelled - exit silently
             self.call_later(self.exit)
 
     def _safe_exit(self) -> None:
-        """Safety exit handler that ensures app terminates.
-
-        This is called after engine completes as a fallback in case
-        on_worker_state_changed doesn't receive the SUCCESS state.
-        Prevents the app from hanging indefinitely.
-        """
+        """Safety exit handler."""
         if self._engine_completed:
-            # Engine finished successfully
             self.notify(
-                "Scraping completed successfully!", title="Done", severity="information"
+                "Scraping completed successfully!",
+                title="Done",
+                severity="information",
             )
         else:
-            # Engine didn't complete normally - force exit anyway
             self.notify("Engine terminated.", title="Exit", severity="warning")
         self.exit()
 
-    def _tick(self) -> None:
-        """Periodic update callback."""
-        if not self.is_paused:
-            stats = self.query_one("#stats-panel", StatsPanel)
-            stats.tick()
+    # ═══════════════════════════════════════════════════════════════════════════
+    # ACTIONS
+    # ═══════════════════════════════════════════════════════════════════════════
 
     def action_toggle_pause(self) -> None:
-        """Toggle pause state."""
-        self.is_paused = not self.is_paused
-        if self.is_paused:
+        """Toggle pause/resume."""
+        self._is_paused = not self._is_paused
+
+        if self._is_paused:
+            self.SUB_TITLE = "● PAUSED"
             self.notify("Paused", title="Status", severity="warning")
         else:
+            self.SUB_TITLE = "● RUNNING"
             self.notify("Resumed", title="Status", severity="information")
 
+        # Notificar a handlers registrados
+        if "pause" in self._command_handlers:
+            self._command_handlers["pause"](self._is_paused)
+
+    def action_go_dashboard(self) -> None:
+        """Vuelve al dashboard desde cualquier pantalla."""
+        if not isinstance(self.screen, DashboardScreen):
+            self.pop_screen()
+
     def action_show_help(self) -> None:
-        """Show help screen."""
+        """Muestra ayuda."""
         self.notify(
-            "Shortcuts: Ctrl+C=Quit, P=Pause",
+            "Shortcuts: P=Pause, C=Queue, E=Errors, Q=Quit",
             title="Help",
             severity="information",
         )
 
-    # Message handlers
+    # ═══════════════════════════════════════════════════════════════════════════
+    # PUBLIC API - Para callbacks externos
+    # ═══════════════════════════════════════════════════════════════════════════
 
-    def on_engine_started(self, event: EngineStarted) -> None:
-        """Handle engine started message."""
-        header = self.query_one("#mission-header", MissionHeader)
-        header.mission_url = event.url
-        header.mission_scope = event.scope
-        header.worker_count = event.workers
+    def handle_event(self, event: TUIEvent) -> None:
+        """Maneja un evento del engine y lo propaga a la pantalla actual.
 
-    def on_engine_progress(self, event: EngineProgress) -> None:
-        """Handle progress update message."""
-        stats = self.query_one("#stats-panel", StatsPanel)
-        stats.pages_completed = event.pages_completed
-        stats.pages_total = event.pages_total
-        stats.assets_completed = event.assets_completed
-        stats.assets_total = event.assets_total
-        stats.seen_urls = event.seen_urls
-        stats.seen_assets = event.seen_assets
+        Args:
+            event: Evento tipado del sistema de mensajes
+        """
+        # Actualizar subtítulo global según estado
+        if isinstance(event, StateChange):
+            self._update_subtitle(event)
 
-    def on_engine_activity(self, event: EngineActivity) -> None:
-        """Handle activity message."""
-        activity = self.query_one("#activity-panel", ActivityPanel)
-        activity.add_activity(event.title, event.engine)
+        # Propagar a la pantalla actual si es DashboardScreen
+        if isinstance(self.screen, DashboardScreen):
+            self.screen.update_from_event(event)
 
-    def on_engine_status(self, event: EngineStatus) -> None:
-        """Handle status update message."""
-        status = self.query_one("#system-status", SystemStatus)
-        status.circuit_state = event.circuit_state
-        status.queue_pending = event.queue_pending
-        status.error_count = event.error_count
-        status.browser_mode = event.browser_mode
+    def _update_subtitle(self, event: StateChange) -> None:
+        """Actualiza el subtítulo de la app según el estado."""
+        state_icons = {
+            "starting": "⏳",
+            "running": "▶",
+            "paused": "⏸",
+            "stopping": "⏹",
+            "stopped": "■",
+            "error": "✗",
+        }
+        icon = state_icons.get(event.state, "●")
+        mode = "🌐" if event.mode == "browser" else "🥷"
+        self.SUB_TITLE = f"{icon} {event.state.upper()} | {mode}"
 
-        # Also update header mode
-        header = self.query_one("#mission-header", MissionHeader)
-        header.engine_mode = "browser" if event.browser_mode else "stealth"
+    def register_command_handler(self, command: str, handler: Callable) -> None:
+        """Registra un handler para un comando.
 
-    # Public API for external updates (via messages)
+        Args:
+            command: Nombre del comando (pause, resume, etc.)
+            handler: Función a llamar cuando se ejecute el comando
+        """
+        self._command_handlers[command] = handler
+
+    # ═══════════════════════════════════════════════════════════════════════════
+    # LEGACY API - Compatibilidad con código existente
+    # ═══════════════════════════════════════════════════════════════════════════
 
     def update_progress(
         self,
@@ -292,21 +248,27 @@ class UIFDashboardApp(App[None]):
         seen_urls: int = 0,
         seen_assets: int = 0,
     ) -> None:
-        """Post a progress update message."""
-        self.post_message(
-            EngineProgress(
-                pages_completed,
-                pages_total,
-                assets_completed,
-                assets_total,
-                seen_urls,
-                seen_assets,
-            )
+        """Post a progress update (legacy API)."""
+        event = ProgressUpdate(
+            pages_completed=pages_completed,
+            pages_total=pages_total,
+            assets_completed=assets_completed,
+            assets_total=assets_total,
+            urls_seen=seen_urls,
+            assets_seen=seen_assets,
         )
+        self.handle_event(event)
 
     def add_activity(self, title: str, engine: str = "unknown") -> None:
-        """Post an activity message."""
-        self.post_message(EngineActivity(title, engine))
+        """Post an activity message (legacy API)."""
+        event = ActivityEvent(
+            url="",
+            title=title,
+            engine=engine,
+            status="success",
+            elapsed_ms=0.0,
+        )
+        self.handle_event(event)
 
     def update_status(
         self,
@@ -315,7 +277,26 @@ class UIFDashboardApp(App[None]):
         error_count: int,
         browser_mode: bool,
     ) -> None:
-        """Post a status update message."""
-        self.post_message(
-            EngineStatus(circuit_state, queue_pending, error_count, browser_mode)
+        """Post a status update (legacy API)."""
+        from typing import Literal, cast
+
+        # Cast a Literal para satisfacer el tipo
+        circuit = cast(
+            Literal["closed", "open", "half-open"],
+            circuit_state
+            if circuit_state in ("closed", "open", "half-open")
+            else "closed",
         )
+        event = SystemStatus(
+            circuit_state=circuit,
+            queue_pending=queue_pending,
+            error_count=error_count,
+            memory_mb=0,
+            cpu_percent=0.0,
+            current_url="",
+            current_worker=0,
+        )
+        self.handle_event(event)
+
+
+__all__ = ["UIFDashboardApp"]
