@@ -93,6 +93,17 @@ class CircuitStateEvent(TUIEvent):
     failure_count: int  # cantidad de fallos que motivaron el cambio
 
 
+class DataSavedEvent(TUIEvent):
+    """Evento de datos persistidos a disco.
+
+    Se emite cuando un bloque de items fue escrito exitosamente.
+    """
+
+    count: int  # Cantidad de items en este bloque
+    total: int  # Total acumulado
+    filename: str  # Nombre del archivo
+
+
 # ═══════════════════════════════════════════════════════════════════════════════
 # CANAL: ERRORS (evento, NO throttled)
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -200,6 +211,7 @@ __all__ = [
     "ActivityEvent",
     "NetworkRetryEvent",
     "CircuitStateEvent",
+    "DataSavedEvent",
     "ErrorEvent",
     "SystemStatus",
     "StateChange",

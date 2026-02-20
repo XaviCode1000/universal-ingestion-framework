@@ -15,6 +15,7 @@ from uif_scraper.core.types import ActivityEntry, EngineStats
 from uif_scraper.tui.messages import (
     ActivityEvent,
     CircuitStateEvent,
+    DataSavedEvent,
     ErrorEvent,
     NetworkRetryEvent,
     ProgressUpdate,
@@ -155,6 +156,21 @@ class TextualUICallback(UICallback):
             error_message=message[:500],  # Truncar
             retry_count=retry_count,
             is_fatal=retry_count >= 3,  # TODO: usar config.max_retries
+        )
+        self._app.handle_event(event)
+
+    def on_data_saved(self, count: int, total: int, filename: str) -> None:
+        """Notifica que un bloque de datos fue persistido.
+
+        Args:
+            count: Cantidad de items en este bloque
+            total: Total acumulado
+            filename: Nombre del archivo
+        """
+        event = DataSavedEvent(
+            count=count,
+            total=total,
+            filename=filename,
         )
         self._app.handle_event(event)
 

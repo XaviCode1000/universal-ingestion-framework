@@ -49,6 +49,7 @@ from uif_scraper.utils.url_utils import slugify, smart_url_normalize
 
 # Import para resilient transport (opcional)
 from uif_scraper.utils.circuit_breaker import CircuitBreaker
+from uif_scraper.infrastructure.persistence import DataWriter
 
 
 # ============================================================================
@@ -119,6 +120,11 @@ class UICallback(ABC):
         ...
 
     @abstractmethod
+    def on_data_saved(self, count: int, total: int, filename: str) -> None:
+        """Notifica que un bloque de datos fue persistido."""
+        ...
+
+    @abstractmethod
     def on_state_change(
         self, state: str, mode: str, previous_state: str | None, reason: str | None
     ) -> None:
@@ -172,6 +178,12 @@ class EngineCore:
         # Queues
         self.url_queue: asyncio.Queue[QueueItem] = asyncio.Queue()
         self.asset_queue: asyncio.Queue[QueueItem] = asyncio.Queue()
+
+        # Persistence queue (Productor-Consumidor pattern)
+        self.data_queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue()
+        self._persistence_worker_task: asyncio.Task[None] | None = None
+        self._data_writer: DataWriter | None = None
+        self._total_items_written: int = 0
 
         # Memory Tracking
         self.seen_urls: TTLCache[str, bool] = TTLCache(
@@ -281,6 +293,9 @@ class EngineCore:
             await self.setup()
         except RuntimeError:
             return
+
+        # Inicializar persistence worker
+        await self._init_persistence_worker()
 
         self.start_time = asyncio.get_event_loop().time()
         self._last_speed_check = self.start_time
@@ -616,11 +631,24 @@ class EngineCore:
             await self.url_queue.put(_STOP_SENTINEL)
         for _ in range(len(self._asset_workers)):
             await self.asset_queue.put(_STOP_SENTINEL)
+
+        # Signal persistence worker to stop
+        await self.data_queue.put(None)  # type: ignore[arg-type]
+
         if workers:
             await asyncio.wait(workers, timeout=MIN_SHUTDOWN_TIMEOUT_SECONDS)
             for w in workers:
                 if not w.done():
                     w.cancel()
+
+        # Wait for persistence worker to finish
+        if self._persistence_worker_task:
+            await self._persistence_worker_task
+
+        # Close data writer
+        if self._data_writer:
+            await self._data_writer.close()
+
         await asyncio.sleep(0.5)
 
     def _notify_ui(self) -> None:
@@ -923,3 +951,75 @@ class EngineCore:
         _ = scope  # Ignorar por compatibilidad
 
         return self.get_config()
+
+    # ═══════════════════════════════════════════════════════════════════════════════
+    # PERSISTENCE WORKER (Productor-Consumidor)
+    # ═══════════════════════════════════════════════════════════════════════════════
+
+    async def _init_persistence_worker(self) -> None:
+        """Inicializa el worker de persistencia."""
+        # Determinar directorio de salida
+        domain_slug = slugify(self.navigation.base_url)
+        output_dir = self.config.data_dir / domain_slug / "raw"
+        output_dir.mkdir(parents=True, exist_ok=True)
+
+        # Callback para notificar a la UI
+        def on_flush(event: Any) -> None:
+            self._total_items_written += event.count
+            if self.ui_callback:
+                self.ui_callback.on_data_saved(
+                    count=event.count,
+                    total=self._total_items_written,
+                    filename=event.filename,
+                )
+
+        # Crear DataWriter
+        self._data_writer = DataWriter(
+            output_dir=output_dir,
+            format="jsonl",
+            buffer_size=50,
+            flush_interval=5.0,
+            on_flush=on_flush,
+        )
+        await self._data_writer.__aenter__()
+
+        # Iniciar worker en background
+        self._persistence_worker_task = asyncio.create_task(self._persistence_worker())
+
+        logger.info(f"Persistence worker started: {output_dir}")
+
+    async def _persistence_worker(self) -> None:
+        """Worker que consume items de la cola y los persiste."""
+        while not self._shutdown_event.is_set():
+            try:
+                # Esperar item de la cola con timeout
+                item = await asyncio.wait_for(
+                    self.data_queue.get(),
+                    timeout=1.0,
+                )
+
+                # None es señal de shutdown
+                if item is None:
+                    break
+
+                # Escribir item
+                if self._data_writer:
+                    await self._data_writer.write(item)
+
+                self.data_queue.task_done()
+
+            except asyncio.TimeoutError:
+                # Timeout, continuar el loop
+                continue
+            except Exception as e:
+                logger.error(f"Persistence worker error: {e}")
+
+        logger.info("Persistence worker stopped")
+
+    async def queue_item_for_persistence(self, item: dict[str, Any]) -> None:
+        """Añade un item a la cola de persistencia.
+
+        Args:
+            item: Diccionario con los datos del item
+        """
+        await self.data_queue.put(item)

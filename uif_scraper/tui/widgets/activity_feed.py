@@ -23,6 +23,7 @@ if TYPE_CHECKING:
     from uif_scraper.tui.messages import (
         ActivityEvent,
         CircuitStateEvent,
+        DataSavedEvent,
         NetworkRetryEvent,
     )
 
@@ -304,6 +305,14 @@ class ActivityFeed(Vertical):
             failure_count=event.failure_count,
         )
 
+    def update_from_data_saved_event(self, event: "DataSavedEvent") -> None:
+        """Actualiza desde un evento DataSavedEvent."""
+        self.add_persistence_activity(
+            count=event.count,
+            total=event.total,
+            filename=event.filename,
+        )
+
     def set_phase_from_activity(self, activity_type: str) -> None:
         """Establece la fase basada en el tipo de actividad.
 
@@ -434,6 +443,38 @@ class ActivityFeed(Vertical):
         # Render inmediatamente para cambios de circuit
         self._render_visible()
         self.post_message(self.ActivityAdded(domain, title, "circuit_breaker", status))
+
+    def add_persistence_activity(
+        self,
+        count: int,
+        total: int,
+        filename: str,
+    ) -> None:
+        """Agrega una actividad de persistencia de datos.
+
+        Args:
+            count: Cantidad de items en este bloque
+            total: Total acumulado
+            filename: Nombre del archivo
+        """
+        now = time()
+
+        title = f"💾 {count} items → {filename}"
+        activity = {
+            "url": filename,
+            "title": title,
+            "engine": f"Total: {total}",
+            "status": "success",
+            "elapsed_ms": 0,
+            "size_bytes": 0,
+            "timestamp": now,
+            "phase": "writing",  # Magenta
+        }
+        self._buffer.appendleft(activity)
+
+        # Render inmediatamente para persistencia
+        self._render_visible()
+        self.post_message(self.ActivityAdded(filename, title, "persistence", "success"))
 
 
 __all__ = ["ActivityFeed", "PHASE_COLORS", "PHASE_ICONS"]
