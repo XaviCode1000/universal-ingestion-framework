@@ -40,43 +40,7 @@ class DashboardScreen(Screen):
     - Barra de estado del sistema
     """
 
-    DEFAULT_CSS = """
-    DashboardScreen {
-        /* Background heredado de Screen en mocha.tcss */
-    }
-
-    #main-container {
-        height: 1fr;
-        padding: 0 1;
-        layout: vertical;
-    }
-
-    #current-url-container {
-        height: auto;
-        margin-bottom: 1;
-    }
-
-    #content-area {
-        height: 1fr;
-        layout: horizontal;
-    }
-
-    #progress-panel {
-        width: 40%;
-        min-width: 35;
-        margin-right: 1;
-    }
-
-    #activity-feed {
-        width: 60%;
-        min-width: 40;
-    }
-
-    #status-bar-container {
-        height: auto;
-        margin-top: 1;
-    }
-    """
+    CSS_PATH = "../styles/mocha.tcss"
 
     def compose(self) -> ComposeResult:
         """Compone el layout del dashboard."""

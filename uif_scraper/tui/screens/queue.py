@@ -32,48 +32,6 @@ class QueueScreen(Screen):
 
     CSS_PATH = "../styles/mocha.tcss"
 
-    DEFAULT_CSS = """
-    QueueScreen {
-        layout: vertical;
-    }
-
-    #toolbar {
-        height: 3;
-        padding: 0 1;
-        layout: horizontal;
-    }
-
-    #search-input {
-        width: 30;
-        margin-right: 2;
-    }
-
-    .filter-btn {
-        min-width: 10;
-        margin-right: 1;
-    }
-
-    .filter-btn.active {
-        background: $mauve;
-        color: $base;
-    }
-
-    #table-container {
-        height: 1fr;
-        padding: 0 1;
-    }
-
-    #queue-table {
-        height: 1fr;
-    }
-
-    #stats-bar {
-        height: 1;
-        padding: 0 1;
-        color: $subtext0;
-    }
-    """
-
     BINDINGS = [
         ("escape", "pop_screen", "Back"),
         ("r", "refresh", "Refresh"),
