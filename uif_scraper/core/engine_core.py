@@ -40,13 +40,16 @@ from uif_scraper.models import MigrationStatus
 from uif_scraper.navigation import NavigationService
 from uif_scraper.reporter import ReporterService
 from uif_scraper.utils.captcha_detector import CaptchaDetector
-from uif_scraper.utils.circuit_breaker import CircuitBreaker
 from uif_scraper.utils.compression import write_compressed_markdown
 from uif_scraper.utils.html_cleaner import pre_clean_html
 from uif_scraper.utils.http_session import HTTPSessionCache
 from uif_scraper.utils.markdown_utils import enhance_markdown_for_rag
 from uif_scraper.utils.robots_checker import RobotsChecker
 from uif_scraper.utils.url_utils import slugify, smart_url_normalize
+
+# Import para resilient transport (opcional)
+from uif_scraper.utils.circuit_breaker import CircuitBreaker
+from uif_scraper.infrastructure.persistence import DataWriter
 
 
 # ============================================================================
@@ -117,6 +120,11 @@ class UICallback(ABC):
         ...
 
     @abstractmethod
+    def on_data_saved(self, count: int, total: int, filename: str) -> None:
+        """Notifica que un bloque de datos fue persistido."""
+        ...
+
+    @abstractmethod
     def on_state_change(
         self, state: str, mode: str, previous_state: str | None, reason: str | None
     ) -> None:
@@ -138,6 +146,8 @@ class EngineCore:
         reporter_service: ReporterService,
         extract_assets: bool = True,
         force: bool = False,
+        on_network_retry: Any = None,
+        on_circuit_change: Any = None,
     ) -> None:
         self.config = config
         self.extract_assets = extract_assets
@@ -148,6 +158,10 @@ class EngineCore:
         self.asset_extractor = asset_extractor
         self.navigation = navigation_service
         self.reporter = reporter_service
+
+        # Callbacks de red para resiliencia
+        self._on_network_retry = on_network_retry
+        self._on_circuit_change = on_circuit_change
 
         # Infrastructure
         self.stats = StatsTracker()
@@ -164,6 +178,12 @@ class EngineCore:
         # Queues
         self.url_queue: asyncio.Queue[QueueItem] = asyncio.Queue()
         self.asset_queue: asyncio.Queue[QueueItem] = asyncio.Queue()
+
+        # Persistence queue (Productor-Consumidor pattern)
+        self.data_queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue()
+        self._persistence_worker_task: asyncio.Task[None] | None = None
+        self._data_writer: DataWriter | None = None
+        self._total_items_written: int = 0
 
         # Memory Tracking
         self.seen_urls: TTLCache[str, bool] = TTLCache(
@@ -273,6 +293,9 @@ class EngineCore:
             await self.setup()
         except RuntimeError:
             return
+
+        # Inicializar persistence worker
+        await self._init_persistence_worker()
 
         self.start_time = asyncio.get_event_loop().time()
         self._last_speed_check = self.start_time
@@ -447,6 +470,18 @@ class EngineCore:
 
             await self._save_markdown(url, metadata, text_data["markdown"])
 
+            # Enviar a la cola de persistencia
+            await self.queue_item_for_persistence(
+                {
+                    "url": url,
+                    "title": metadata.get("title"),
+                    "content": text_data["markdown"],
+                    "content_type": "text",
+                    "domain": self.navigation.domain,
+                    "metadata": metadata,
+                }
+            )
+
             new_pages, new_assets = self.navigation.extract_links(page, url)
             await self._queue_discovered_links(new_pages, new_assets)
 
@@ -608,11 +643,40 @@ class EngineCore:
             await self.url_queue.put(_STOP_SENTINEL)
         for _ in range(len(self._asset_workers)):
             await self.asset_queue.put(_STOP_SENTINEL)
+
         if workers:
             await asyncio.wait(workers, timeout=MIN_SHUTDOWN_TIMEOUT_SECONDS)
             for w in workers:
                 if not w.done():
                     w.cancel()
+
+        # === PERSISTENCE DRAINAGE ===
+        # 1. Send stop signal (None) to persistence queue
+        await self.data_queue.put(None)  # type: ignore[arg-type]
+
+        # 2. Wait for all items to be processed (queue.join())
+        try:
+            await asyncio.wait_for(
+                self.data_queue.join(),
+                timeout=30.0,  # Max 30s for drainage
+            )
+        except asyncio.TimeoutError:
+            logger.warning("Persistence queue drainage timed out")
+
+        # 3. Wait for persistence worker to finish
+        if self._persistence_worker_task:
+            try:
+                await asyncio.wait_for(
+                    self._persistence_worker_task,
+                    timeout=10.0,
+                )
+            except asyncio.TimeoutError:
+                logger.warning("Persistence worker did not finish in time")
+
+        # 4. Force final flush (captura cualquier item restante)
+        if self._data_writer:
+            await self._data_writer.close()
+
         await asyncio.sleep(0.5)
 
     def _notify_ui(self) -> None:
@@ -695,6 +759,40 @@ class EngineCore:
                 mode="browser" if self.use_browser_mode else "stealth",
                 previous_state=previous,
                 reason=reason,
+            )
+
+    def _notify_network_retry(
+        self,
+        url: str,
+        attempt_number: int,
+        wait_time: float,
+        reason: str,
+    ) -> None:
+        """Emite evento de retry de red."""
+        # Notificar via callback directo (para ResilientTransport)
+        if self._on_network_retry:
+            self._on_network_retry(url, attempt_number, wait_time, reason)
+
+        # Also notify via UI callback if available
+        if self.ui_callback and hasattr(self.ui_callback, "on_network_retry"):
+            self.ui_callback.on_network_retry(url, attempt_number, wait_time, reason)
+
+    def _notify_circuit_change(
+        self,
+        domain: str,
+        old_state: str,
+        new_state: str,
+        failure_count: int,
+    ) -> None:
+        """Emite evento de cambio de circuit breaker."""
+        # Notificar via callback directo (para ResilientTransport)
+        if self._on_circuit_change:
+            self._on_circuit_change(domain, old_state, new_state, failure_count)
+
+        # Also notify via UI callback if available
+        if self.ui_callback and hasattr(self.ui_callback, "on_circuit_state_change"):
+            self.ui_callback.on_circuit_state_change(
+                domain, old_state, new_state, failure_count
             )
 
     def _update_speed(self) -> None:
@@ -881,3 +979,79 @@ class EngineCore:
         _ = scope  # Ignorar por compatibilidad
 
         return self.get_config()
+
+    # ═══════════════════════════════════════════════════════════════════════════════
+    # PERSISTENCE WORKER (Productor-Consumidor)
+    # ═══════════════════════════════════════════════════════════════════════════════
+
+    async def _init_persistence_worker(self) -> None:
+        """Inicializa el worker de persistencia."""
+        # Determinar directorio de salida
+        domain_slug = slugify(self.navigation.base_url)
+        output_dir = self.config.data_dir / domain_slug / "raw"
+        output_dir.mkdir(parents=True, exist_ok=True)
+
+        # Callback para notificar a la UI
+        def on_flush(event: Any) -> None:
+            self._total_items_written += event.count
+            if self.ui_callback:
+                self.ui_callback.on_data_saved(
+                    count=event.count,
+                    total=self._total_items_written,
+                    filename=event.filename,
+                )
+
+        # Crear DataWriter
+        self._data_writer = DataWriter(
+            output_dir=output_dir,
+            format="jsonl",
+            buffer_size=50,
+            flush_interval=5.0,
+            on_flush=on_flush,
+        )
+        await self._data_writer.__aenter__()
+
+        # Iniciar worker en background
+        self._persistence_worker_task = asyncio.create_task(self._persistence_worker())
+
+        logger.info(f"Persistence worker started: {output_dir}")
+
+    async def _persistence_worker(self) -> None:
+        """Worker que consume items de la cola y los persiste."""
+        while not self._shutdown_event.is_set():
+            try:
+                # Esperar item de la cola con timeout
+                item = await asyncio.wait_for(
+                    self.data_queue.get(),
+                    timeout=1.0,
+                )
+
+                try:
+                    # None es señal de shutdown
+                    if item is None:
+                        # No escribir nada, solo salir
+                        break
+
+                    # Escribir item
+                    if self._data_writer:
+                        await self._data_writer.write(item)
+
+                finally:
+                    # SIEMPRE marcar como done, incluso si falló el write
+                    self.data_queue.task_done()
+
+            except asyncio.TimeoutError:
+                # Timeout, continuar el loop
+                continue
+            except Exception as e:
+                logger.error(f"Persistence worker error: {e}")
+
+        logger.info("Persistence worker stopped")
+
+    async def queue_item_for_persistence(self, item: dict[str, Any]) -> None:
+        """Añade un item a la cola de persistencia.
+
+        Args:
+            item: Diccionario con los datos del item
+        """
+        await self.data_queue.put(item)

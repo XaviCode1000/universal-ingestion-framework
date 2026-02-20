@@ -68,6 +68,42 @@ class ActivityEvent(TUIEvent):
     size_bytes: int = 0
 
 
+class NetworkRetryEvent(TUIEvent):
+    """Evento de reintento de red.
+
+    Se emite cuando una petición falla y se reintenta automáticamente.
+    Útil para debugging de problemas de conectividad.
+    """
+
+    url: str
+    attempt_number: int
+    wait_time: float  # segundos de espera antes del reintento
+    reason: str  # TimeoutError, ConnectionError, HTTP 429, etc.
+
+
+class CircuitStateEvent(TUIEvent):
+    """Evento de cambio de estado del Circuit Breaker por dominio.
+
+    Se emite cuando el circuit breaker cambia de estado (closed → open → half-open).
+    """
+
+    domain: str
+    old_state: Literal["closed", "open", "half-open"]
+    new_state: Literal["closed", "open", "half-open"]
+    failure_count: int  # cantidad de fallos que motivaron el cambio
+
+
+class DataSavedEvent(TUIEvent):
+    """Evento de datos persistidos a disco.
+
+    Se emite cuando un bloque de items fue escrito exitosamente.
+    """
+
+    count: int  # Cantidad de items en este bloque
+    total: int  # Total acumulado
+    filename: str  # Nombre del archivo
+
+
 # ═══════════════════════════════════════════════════════════════════════════════
 # CANAL: ERRORS (evento, NO throttled)
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -173,6 +209,9 @@ __all__ = [
     "ProgressUpdate",
     "SpeedUpdate",
     "ActivityEvent",
+    "NetworkRetryEvent",
+    "CircuitStateEvent",
+    "DataSavedEvent",
     "ErrorEvent",
     "SystemStatus",
     "StateChange",
