@@ -2,8 +2,8 @@ import io
 import time
 from typing import Any
 
-import trafilatura
 from bs4 import BeautifulSoup
+from html_to_markdown import ConversionOptions, convert
 from loguru import logger
 from markitdown import MarkItDown
 
@@ -12,13 +12,21 @@ from uif_scraper.utils.text_utils import clean_text
 
 
 class TextExtractor(IExtractor):
-    """Extractor de texto con fallback automático y métricas de performance."""
+    """Extractor de texto con fallback automático y métricas de performance.
+
+    Usa html-to-markdown (Rust core) como método principal:
+    - 18x más rápido que trafilatura (280 MB/s vs 15 MB/s)
+    - Type hints completos para Python 3.12+
+    - Mejor preservación de estructura semántica
+    """
 
     def __init__(self) -> None:
         self.md_converter = MarkItDown()
+        # Pre-crear opciones de conversión para reutilizar
+        self._options = ConversionOptions(heading_style="atx")
 
     async def extract(self, content: Any, url: str) -> dict[str, Any]:
-        """Extrae texto como markdown usando trafilatura con fallback a MarkItDown.
+        """Extrae texto como markdown usando html-to-markdown con fallback.
 
         Args:
             content: HTML crudo a procesar
@@ -33,22 +41,18 @@ class TextExtractor(IExtractor):
             return {"markdown": "", "engine": "none"}
 
         extracted_md: str | None = None
-        engine = "trafilatura"
+        engine = "html-to-markdown"
         error_context: dict[str, Any] = {}
 
         try:
             start_time = time.perf_counter()
-            extracted_md = trafilatura.extract(
-                content,
-                include_tables=True,
-                include_comments=False,
-                output_format="markdown",
-            )
+            # Conversión HTML→Markdown con html-to-markdown (Rust core)
+            extracted_md = convert(content, self._options)
             elapsed_ms = (time.perf_counter() - start_time) * 1000
 
             # Log para debugging de contenido y resultado
             logger.debug(
-                "Trafilatura extraction result",
+                "html-to-markdown extraction result",
                 extra={
                     "url": url,
                     "input_length": len(content),
@@ -61,7 +65,7 @@ class TextExtractor(IExtractor):
             # Log métrica de performance para debugging
             if elapsed_ms > 1000:  # Más de 1 segundo es lento
                 logger.warning(
-                    "Trafilatura slow extraction",
+                    "html-to-markdown slow extraction",
                     extra={
                         "url": url,
                         "elapsed_ms": elapsed_ms,
@@ -76,10 +80,10 @@ class TextExtractor(IExtractor):
                 "content_length": len(content),
                 "content_preview": content[:200] if len(content) > 200 else content,
             }
-            logger.warning("Trafilatura extraction failed", extra=error_context)
+            logger.warning("html-to-markdown extraction failed", extra=error_context)
             extracted_md = None
 
-        # NIVEL 2: Fallback a MarkItDown si trafilatura es insuficiente
+        # NIVEL 2: Fallback a MarkItDown si html-to-markdown es insuficiente
         # Reducido de 250 a 100 chars para ser menos agresivo
         if not extracted_md or len(extracted_md) < 100:
             try:
@@ -101,7 +105,7 @@ class TextExtractor(IExtractor):
                     "url": url,
                     "error": str(e),
                     "error_type": type(e).__name__,
-                    "primary_engine": "trafilatura",
+                    "primary_engine": "html-to-markdown",
                     "fallback_engine": "markitdown",
                 }
                 logger.debug(
