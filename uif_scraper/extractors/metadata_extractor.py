@@ -1,14 +1,16 @@
 from __future__ import annotations
 
 import hashlib
-import json
 from functools import lru_cache
 from typing import Any
 from urllib.parse import urlparse
 
-import trafilatura
+from html_to_markdown import (
+    ConversionOptions,
+    MetadataConfig,
+    convert_with_metadata,
+)
 from pydantic import BaseModel, Field
-from selectolax.parser import HTMLParser
 
 from uif_scraper.extractors.base import IExtractor
 
@@ -84,7 +86,12 @@ class MetadataExtractor(IExtractor):
     def _extract_metadata_pure(
         self, content_hash: str, content: str, url: str
     ) -> dict[str, Any]:
-        """Extracción completa de metadata con soporte OG, Twitter, JSON-LD.
+        """Extracción completa de metadata con html-to-markdown.
+
+        Usa la librería html-to-markdown (Rust core) para:
+        - Conversión HTML→Markdown 18x más rápida
+        - Metadata extraction integrada (OG, Twitter, headers, JSON-LD)
+        - Type hints completos para Python 3.12+
 
         Args:
             content_hash: Hash del contenido para caché
@@ -94,99 +101,90 @@ class MetadataExtractor(IExtractor):
         Returns:
             Diccionario con metadata completa extraída
         """
-        tree = HTMLParser(content)
         domain = urlparse(url).netloc
 
-        # === HELPERS ===
-        def get_meta(prop_type: str, name: str) -> str | None:
-            """Extrae valor de meta tag por property o name."""
-            tag = tree.css_first(f'meta[{prop_type}="{name}"]')
-            return tag.attributes.get("content") if tag else None
+        # === HTML-TO-MARKDOWN EXTRACTION ===
+        options = ConversionOptions(heading_style="atx")
+        config = MetadataConfig(
+            extract_document=True,  # Title, description, keywords, OG, Twitter
+            extract_headers=True,  # H1-H6 para TOC
+            extract_links=False,  # No necesitamos links aquí
+            extract_images=False,  # No necesitamos imágenes aquí
+            extract_structured_data=True,  # JSON-LD, Microdata, RDFa
+        )
+
+        # Convertir y extraer metadata (no usamos el markdown aquí)
+        _, md_metadata = convert_with_metadata(content, options, config)
+
+        # === EXTRAER METADATA DEL RESULTADO ===
+        doc_meta = md_metadata.get("document", {})
+
+        # Título: OG > title tag > H1 > default
+        title = (
+            doc_meta.get("title")
+            or doc_meta.get("og_title")
+            or "Documento"
+        )
+        if title:
+            title = str(title).split("|")[0].split(" - ")[0].strip()
+
+        # Author: meta tag > "Desconocido"
+        author = doc_meta.get("author") or "Desconocido"
+
+        # Date: structured data > meta > "N/A"
+        date = doc_meta.get("date") or "N/A"
+
+        # Sitename: OG > domain
+        sitename = doc_meta.get("sitename") or doc_meta.get("og_site_name") or domain
+
+        # Description: meta description
+        description = doc_meta.get("description")
+
+        # Keywords: meta keywords (puede ser string o lista)
+        keywords_raw = doc_meta.get("keywords", [])
+        if isinstance(keywords_raw, str):
+            keywords = [k.strip() for k in keywords_raw.split(",") if k.strip()]
+        else:
+            keywords = list(keywords_raw) if keywords_raw else []
 
         # === OPEN GRAPH ===
-        og_title = get_meta("property", "og:title")
-        og_description = get_meta("property", "og:description")
-        og_image = get_meta("property", "og:image")
-        og_type = get_meta("property", "og:type")
+        og_data = doc_meta.get("open_graph", {})
+        og_title = og_data.get("title") or doc_meta.get("og_title")
+        og_description = og_data.get("description") or doc_meta.get("og_description")
+        og_image = og_data.get("image") or doc_meta.get("og_image")
+        og_type = og_data.get("type") or doc_meta.get("og_type")
 
         # === TWITTER CARDS ===
-        twitter_card = get_meta("name", "twitter:card")
-        twitter_site = get_meta("name", "twitter:site")
-        twitter_title = get_meta("name", "twitter:title")
+        twitter_data = doc_meta.get("twitter_card", {})
+        twitter_card = twitter_data.get("card") or doc_meta.get("twitter_card")
+        twitter_site = twitter_data.get("site") or doc_meta.get("twitter_site")
+        twitter_title = twitter_data.get("title") or doc_meta.get("twitter_title")
 
-        # === META TAGS ESTÁNDAR ===
-        meta_description = get_meta("name", "description")
-        meta_keywords = get_meta("name", "keywords") or ""
-        keywords = [k.strip() for k in meta_keywords.split(",") if k.strip()]
-
-        # === JSON-LD (Structured Data) ===
+        # === STRUCTURED DATA (JSON-LD) ===
+        structured_data = md_metadata.get("structured_data", [])
         json_ld: dict[str, Any] | None = None
-        json_ld_tag = tree.css_first('script[type="application/ld+json"]')
-        if json_ld_tag:
-            try:
-                json_ld = json.loads(json_ld_tag.text())
-            except (json.JSONDecodeError, ValueError):
-                json_ld = None
-
-        # === TITLE (fallback chain) ===
-        title_tag = tree.css_first("title")
-        h1 = tree.css_first("h1")
-
-        title: str = "Documento"
-        detected_title: str | None = None
-
-        # Prioridad: OG > title tag > H1
-        if og_title:
-            detected_title = og_title
-        elif title_tag:
-            detected_title = title_tag.text(strip=True)
-        elif h1:
-            detected_title = h1.text(strip=True)
-
-        if detected_title:
-            title = str(detected_title).split("|")[0].split(" - ")[0].strip()
-
-        # === TRAFILATURA METADATA (fallback) ===
-        try:
-            traf_metadata = trafilatura.extract_metadata(content)
-        except Exception:
-            traf_metadata = None
-
-        # Author: meta tag > trafilatura > "Desconocido"
-        author = get_meta("name", "author")
-        if not author:
-            raw_author = (
-                getattr(traf_metadata, "author", None) if traf_metadata else None
-            )
-            author = raw_author or "Desconocido"
-
-        # Date: JSON-LD > trafilatura > "N/A"
-        date = "N/A"
-        if json_ld and isinstance(json_ld, dict):
-            date = json_ld.get("datePublished") or json_ld.get("dateCreated") or "N/A"
-        if date == "N/A" and traf_metadata:
-            raw_date = getattr(traf_metadata, "date", None)
-            date = raw_date or "N/A"
-
-        # Sitename: OG > trafilatura > domain
-        sitename = get_meta("property", "og:site_name")
-        if not sitename:
-            raw_sitename = (
-                getattr(traf_metadata, "sitename", None) if traf_metadata else None
-            )
-            sitename = raw_sitename or domain
+        if structured_data and isinstance(structured_data, list):
+            # Tomar el primer JSON-LD válido
+            for sd in structured_data:
+                if isinstance(sd, dict) and sd.get("@context"):
+                    json_ld = sd
+                    break
 
         # === HEADERS H1-H6 (para TOC - Fase B) ===
+        # html-to-markdown ya extrae headers con nivel, texto, id
         headers: list[DocumentHeader] = []
-        for level in range(1, 7):
-            for h in tree.css(f"h{level}"):
-                header_text = h.text(strip=True)
-                if header_text:  # Solo agregar si tiene texto
+        headers_raw = md_metadata.get("headers", [])
+        for h in headers_raw:
+            if isinstance(h, dict):
+                level = h.get("level", 1)
+                text = h.get("text", "")
+                header_id = h.get("id")
+                if text and 1 <= level <= 6:
                     headers.append(
                         DocumentHeader(
                             level=level,
-                            text=header_text,
-                            id=h.attributes.get("id"),
+                            text=text,
+                            id=header_id,
                         )
                     )
 
@@ -197,7 +195,7 @@ class MetadataExtractor(IExtractor):
             author=author,
             date=date,
             sitename=sitename,
-            description=meta_description,
+            description=description,
             keywords=keywords,
             og_title=og_title,
             og_description=og_description,
