@@ -1,7 +1,7 @@
 # 🛸 Universal Ingestion Framework (UIF)
 
 [![Python 3.12+](https://img.shields.io/badge/python-3.12+-blue.svg)](https://www.python.org/downloads/)
-[![Architecture: Multi-Layer](https://img.shields.io/badge/architecture-multi--layer-orange.svg)]()
+[![Architecture: v4.0 Resilience](https://img.shields.io/badge/architecture-v4.0%20resilience-orange.svg)]()
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)]()
 [![Tests: 102 passing](https://img.shields.io/badge/tests-102%20passing-brightgreen.svg)]()
 [![Coverage: 90%](https://img.shields.io/badge/coverage-90%25-success.svg)]()
@@ -12,206 +12,123 @@ UIF is a high-fidelity knowledge ingestion engine designed to transform legacy w
 
 ---
 
-## 🛑 ELITE CAPABILITIES
+## 🛑 ELITE CAPABILITIES (v4.0 "Resilience & Scale")
 
-- **Hybrid Multimodal Ingestion**: High-fidelity conversion for `PDF`, `DOCX`, `XLSX`, and `PPTX` via **MarkItDown**, and superior semantic extraction for HTML via **Trafilatura**.
-- **Industrial-Grade Cleaning**: Pre-pruning pipeline with **Selectolax**, sanitization with **nh3**, and Unicode normalization with **ftfy** to eliminate 100% of noise and *mojibake*.
-- **Intelligent Navigation (Scope Control)**: `SMART`, `STRICT`, and `BROAD` strategies to surgically control crawl scope (preventing leaks outside of sub-sites or specific documentation).
-- **Enriched RAG Context**: Automatic injection of **YAML Frontmatter** (URL, author, date, title) into every file for seamless indexing in vector databases.
-- **Industrial Resilience**: State management using **SQLite in WAL mode**, allowing real concurrency and automatic recovery from failures.
-- **Graceful Shutdown**: Clean process termination with `SIGTERM`/`SIGINT` signal handling, ensuring no data loss during interruptions.
-- **Conversational UX**: Interactive Wizard for guided configuration of scope, processes, and content types.
-
----
-
-## 🏗️ TECHNICAL ARCHITECTURE (v3.1.0 - Enhanced RAG Pipeline)
-
-The engine operates across four layers of refinement:
-
-1. **Navigation Layer (Scrapling + Scope Logic)**: Asynchronous orchestration with block evasion and intelligent scope filtering based on seed URL depth.
-2. **Purification Layer (Selectolax + Density Analysis)**: Massive noise elimination via static selectors and a **Link Density Algorithm** that detects and removes menus/sidebars even in non-semantic sites.
-3. **Hybrid Conversion Layer**: Dynamic selection of the best engine with a **Waterfall Title Strategy** to guarantee accurate metadata, using **Trafilatura** and **MarkItDown**.
-4. **Refinement Layer (ftfy + YAML)**: Final text normalization (mojibake fix) and structured metadata enrichment for maximum compatibility with RAG systems.
-
-### Key Technical Features
-
-- **Python 3.12+ Type Hints**: Modern syntax (`list[]`, `dict[]`, `X | None`) for better code clarity.
-- **Immutable Data Models**: Pydantic models with `frozen=True` for thread-safe data handling.
-- **Memory Optimized**: `__slots__` in high-frequency classes like `CircuitBreaker`.
-- **Async-First**: Built with `asyncio.TaskGroup` patterns and semaphore-based concurrency control.
+- **Memory-Safe Ingestion**: Zero-leak architecture using **TTLCache** and DB fallbacks, allowing missions with millions of URLs on consumer hardware.
+- **Legal & Ethical Compliance**: Native **Robots.txt** enforcement and user-agent management with per-domain caching.
+- **Production Security**: Mandatory **SSL/TLS verification** via `certifi` and mission locks to prevent race conditions.
+- **Anti-Scraping Detection**: Advanced detection of **Cloudflare**, reCAPTCHA, and hCaptcha challenges to ensure data quality.
+- **Hybrid Multimodal Ingestion**: High-fidelity conversion for `PDF`, `DOCX`, `XLSX`, and `PPTX` via **MarkItDown**.
+- **Industrial Resilience**: Multi-instance safety with **Mission Locks** and persistent state in **SQLite WAL mode**.
+- **RAG-Ready Output**: Automatic injection of hierarchical TOCs and YAML Frontmatter optimized for vector databases.
 
 ---
 
-## 🎯 v3.1.0 - ENHANCED RAG PIPELINE (NEW)
+## 📦 STACK TÉCNICO
 
-### Features Added
+| Category | Technology |
+|----------|------------|
+| **Runtime** | [uv](https://github.com/astral-sh/uv) (Package & Project Manager) |
+| **Core** | Python 3.12+ (Type hints, TaskGroups, Inmutable Models) |
+| **Data Validation** | Pydantic V2 (`frozen=True`) |
+| **Fetching** | Scrapling (AsyncStealthySession + Chrome Impersonation) |
+| **Database** | aiosqlite (WAL mode + Atomic RETURNING) |
+| **Caching** | cachetools (TTLCache for OOM prevention) |
+| **Markdown** | MarkItDown (Multimodal conversion) |
+| **UI/UX** | Textual (TUI) & Rich (CLI) |
 
-| Feature | Description | Impact |
-|---------|-------------|--------|
-| **Expanded Metadata** | Open Graph, Twitter Cards, JSON-LD, meta tags extraction | +40% context for LLMs |
-| **Automatic TOC** | Hierarchical table of contents from H1-H6 headers | +35% RAG retrieval accuracy |
-| **URL Normalization** | Auto-convert http:// to https:// for consistency | 100% URL consistency |
-| **RAG Frontmatter** | 14 filtered fields (excludes heavy headers/JSON-LD) | -25% token usage |
+---
 
-### Technical Improvements
+## 🚀 INSTALLATION
 
-- **90% test coverage** on metadata extraction (27 new tests)
-- **HTTPS normalization** prevents mixed-protocol issues
-- **Removed `markdownify`** dependency (now using MarkItDown exclusively)
-- **Author/Date fallback** handles None values gracefully
+This project uses `uv` for ultra-fast, deterministic dependency management. **pip/poetry are not supported.**
 
-### Performance Metrics
-
-```
-Token Reduction:     ~20-30% less context per document (filtered frontmatter)
-RAG Accuracy:        +35% improvement (TOC-enhanced retrieval)
-Metadata Richness:   6 → 14 fields (OG, Twitter, JSON-LD, headers)
-Test Coverage:       75 → 102 tests (+27 for metadata)
+### 1. Prerequisites
+Install `uv` if you haven't already:
+```bash
+curl -LsSf https://astral.sh/uv/install.sh | sh
 ```
 
-### Example Output (v3.1.0)
-
-```yaml
----
-url: https://example.com/docs/guide
-title: Complete Guide
-author: John Doe
-date: 2024-01-15
-sitename: Example Docs
-ingestion_engine: UIF v3.0
-og_title: Complete Guide - Example
-og_description: Learn everything about...
-og_image: https://example.com/og-image.png
-og_type: article
-twitter_card: summary_large_image
-twitter_site: @example
-description: Full meta description for SEO
-keywords: [guide, tutorial, example]
----
-
-## Tabla de Contenidos
-
-- [Complete Guide](#_top)
-  - [Introduction](#introduction)
-  - [Getting Started](#getting-started)
-    - [Installation](#installation)
-    - [Configuration](#configuration)
-  - [Advanced Usage](#advanced-usage)
-
-## Introduction
-
-Content here...
+### 2. Setup
+Clone the repository and sync the environment:
+```bash
+git clone https://github.com/your-repo/universal-ingestion-framework.git
+cd universal-ingestion-framework
+uv sync
 ```
+
+### 3. Browser Setup (Optional)
+Required for websites with heavy JavaScript or protection challenges:
+```bash
+uv run playwright install chromium
+```
+
+---
+
+## 🏗️ USAGE
+
+### Interactive Mode (Recommended)
+Run the interactive wizard to configure your mission step-by-step:
+```bash
+uv run uif-scraper --setup
+```
+
+### Direct CLI Mode
+Start a mission immediately from the command line:
+```bash
+uv run uif-scraper https://example.com --workers 10 --scope smart
+```
+
+---
+
+## 📁 PROJECT STRUCTURE
+
+```text
+universal-ingestion-framework/
+├── data/                    # Ingested data (sanitized by domain)
+│   └── domain_com/
+│       ├── raw/             # Raw HTML and source files
+│       ├── processed/       # Optimized Parquet/JSONL datasets
+│       ├── content/         # Final Markdown with RAG enhancements
+│       └── logs/            # Domain-specific ingestion logs
+├── src/uif_scraper/         # Main framework source
+│   ├── core/                # Orchestrator, Stats, and Constants
+│   ├── extractors/          # Specialized metadata & content extractors
+│   ├── utils/               # Robots, Captcha, SSL, and URL tools
+│   └── models.py            # Strict Pydantic schemas
+├── tests/                   # 100+ tests (Unit, E2E, Integration)
+└── pyproject.toml           # uv project configuration
+```
+
+---
+
+## 🏗️ ARCHITECTURE LAYERS (v4.0)
+
+1. **Governance Layer (RobotsChecker + MissionLock)**: Ensures legal compliance and prevents resource contention in multi-instance deployments.
+2. **Orchestration Layer (EngineCore + WorkerPool)**: Manages concurrent TaskGroups with adaptive rate limiting and memory-safe URL tracking.
+3. **Extraction Layer (Metadata + MarkItDown)**: Transforms messy structures into clean, RAG-optimized Markdown with enhanced frontmatter.
+4. **Persistence Layer (aiosqlite + Batch Flushing)**: Guarantees data integrity with minimal disk I/O impact.
 
 ---
 
 ## 🧪 TESTING
 
-UIF includes a comprehensive test suite with **102+ tests** covering unit, integration, and end-to-end scenarios:
-
 ```bash
 # Run all tests
 uv run pytest tests/ -v
 
-# Run quick tests only (skip browser-based e2e)
-uv run pytest tests/ -v -k "not browser"
-
-# Run with coverage report
-uv run pytest tests/ -v --cov=uif_scraper --cov-report=html
-
-# Run only end-to-end tests (requires internet)
-uv run pytest tests/test_e2e.py tests/test_e2e_browser.py -v
-
-# Run metadata extraction tests (v3.1.0+)
-uv run pytest tests/test_metadata_extraction_expanded.py -v --cov=uif_scraper/extractors/metadata_extractor
-```
-
-### Test Coverage
-
-| Category | Tests | Description |
-|----------|-------|-------------|
-| Unit Tests | 51 | Navigation, extractors, DB, utils |
-| E2E (HTTP) | 4 | Real HTTP requests to webscraper.io |
-| E2E (Browser) | 3 | Full browser automation with Chromium |
-| Integration | 17 | Engine orchestration, shutdown, reporting |
-| **Metadata (NEW)** | **27** | **OG, Twitter, JSON-LD, headers, frontmatter** |
-
----
-
-## 🚀 INSTALLATION AND USAGE
-
-This project uses `uv` for ultra-fast, deterministic dependency management.
-
-### Prerequisites
-```bash
-# Install uv if you don't have it
-curl -LsSf https://astral.sh/uv/install.sh | sh
-
-# Install dependencies and lock file
-uv sync
-```
-
-### Browser Setup (Optional - for E2E tests with browser)
-```bash
-# Install Chromium for Playwright (required for browser-based E2E tests)
-uv run playwright install chromium
-```
-
-### Interactive Execution (Recommended)
-Simply run the engine and follow the visual assistant:
-```bash
-uv run uif-scraper --setup
-```
-
-### Automatic Execution (CLI)
-For automated workflows or shell scripts:
-```bash
-uv run uif-scraper https://example.com --workers 10 --scope smart
-```
-
-### CLI Options
-
-| Option | Description |
-|--------|-------------|
-| `--setup` | Run interactive configuration wizard |
-| `--config <path>` | Use custom config file |
-| `--scope <smart\|strict\|broad>` | Set crawl scope |
-| `--workers <n>` | Number of concurrent workers |
-| `--only-text` | Skip asset downloads |
-
----
-
-## 📁 OUTPUT STRUCTURE
-
-Each project generates an independent data capsule:
-
-```text
-data/
-└── domain_com/
-    ├── content/              # Pure Markdown from web pages
-    ├── media/
-    │   ├── images/           # Downloaded visual assets
-    │   └── docs/             # PDFs/Office + their .md mirrors
-    ├── state_domain_com.db  # State database (WAL)
-    └── migration_audit.jsonl # Low-level audit log
+# Run with coverage
+uv run pytest tests/ --cov=uif_scraper --cov-report=term-missing
 ```
 
 ---
 
-## 🧪 MAINTENANCE
+## 📚 DOCUMENTATION
 
-To perform a controlled purge of the data environment and caches before a new migration:
-```bash
-uv run clean.py
-```
-
----
-
-## 📚 Documentation
-
-- [CHANGELOG.md](docs/CHANGELOG.md) - Version history and changes
-- [MIGRATION_GUIDE.md](docs/MIGRATION_GUIDE.md) - Migration guide from v2.2 to v3.0
+- [CHANGELOG.md](docs/CHANGELOG.md) - Release history
+- [PRD.md](PRD.md) - Product Requirements and Roadmap
+- [AGENTS.md](AGENTS.md) - Rules for AI Agents and Contributors
 
 ---
 
-**Architect:** "In UIF, we don't scrape data; we curate knowledge. Every generated file is a pure signal ready to be understood by the next generation of AIs."
+**Architect:** "In UIF, we curate knowledge. v4.0 isn't just a scraper; it's a resilient infrastructure for the era of Large Language Models."
