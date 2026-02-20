@@ -1029,8 +1029,7 @@ class EngineCore:
                 try:
                     # None es señal de shutdown
                     if item is None:
-                        # Importante: marcar como done para que join() funcione
-                        self.data_queue.task_done()
+                        # No escribir nada, solo salir
                         break
 
                     # Escribir item
