@@ -20,7 +20,11 @@ from textual.reactive import reactive
 from textual.widgets import Static
 
 if TYPE_CHECKING:
-    from uif_scraper.tui.messages import ActivityEvent
+    from uif_scraper.tui.messages import (
+        ActivityEvent,
+        CircuitStateEvent,
+        NetworkRetryEvent,
+    )
 
 
 # Phase-specific colors para diferenciación visual
@@ -29,6 +33,9 @@ PHASE_COLORS: dict[str, str] = {
     "extraction": "green",  # #a6e3a1 - Fetch & parse de página
     "writing": "magenta",  # #cba6f7 - Escribiendo a disco
     "rate_limit": "yellow",  # #f9e2af - Esperando throttling
+    "retry": "orange",  # #fab387 - Reintento de red
+    "circuit_open": "red",  # #f38ba8 - Circuit breaker abierto
+    "circuit_half_open": "yellow",  # #f9e2af - Circuit breaker medio abierto
     "idle": "dim",  # Sin actividad
 }
 
@@ -37,6 +44,9 @@ PHASE_ICONS: dict[str, str] = {
     "extraction": "⬇️",
     "writing": "💾",
     "rate_limit": "⏳",
+    "retry": "🔄",
+    "circuit_open": "🚫",
+    "circuit_half_open": "🧪",
     "idle": "💤",
 }
 
@@ -90,7 +100,14 @@ class ActivityFeed(Vertical):
         self._timestamps: dict[int, float] = {}
         # Fase actual para coloración
         self._current_phase: Literal[
-            "discovery", "extraction", "writing", "rate_limit", "idle"
+            "discovery",
+            "extraction",
+            "writing",
+            "rate_limit",
+            "retry",
+            "circuit_open",
+            "circuit_half_open",
+            "idle",
         ] = "idle"
 
     def compose(self) -> ComposeResult:
@@ -158,7 +175,16 @@ class ActivityFeed(Vertical):
 
     def set_phase(
         self,
-        phase: Literal["discovery", "extraction", "writing", "rate_limit", "idle"],
+        phase: Literal[
+            "discovery",
+            "extraction",
+            "writing",
+            "rate_limit",
+            "retry",
+            "circuit_open",
+            "circuit_half_open",
+            "idle",
+        ],
     ) -> None:
         """Establece la fase actual para coloración del feed.
 
@@ -260,6 +286,24 @@ class ActivityFeed(Vertical):
             size_bytes=event.size_bytes,
         )
 
+    def update_from_retry_event(self, event: "NetworkRetryEvent") -> None:
+        """Actualiza desde un evento NetworkRetryEvent."""
+        self.add_retry_activity(
+            url=event.url,
+            attempt_number=event.attempt_number,
+            wait_time=event.wait_time,
+            reason=event.reason,
+        )
+
+    def update_from_circuit_event(self, event: "CircuitStateEvent") -> None:
+        """Actualiza desde un evento CircuitStateEvent."""
+        self.add_circuit_activity(
+            domain=event.domain,
+            old_state=event.old_state,
+            new_state=event.new_state,
+            failure_count=event.failure_count,
+        )
+
     def set_phase_from_activity(self, activity_type: str) -> None:
         """Establece la fase basada en el tipo de actividad.
 
@@ -274,10 +318,105 @@ class ActivityFeed(Vertical):
         }
         raw_phase = phase_mapping.get(activity_type, "idle")
         phase = cast(
-            Literal["discovery", "extraction", "writing", "rate_limit", "idle"],
+            Literal[
+                "discovery",
+                "extraction",
+                "writing",
+                "rate_limit",
+                "retry",
+                "circuit_open",
+                "circuit_half_open",
+                "idle",
+            ],
             raw_phase,
         )
         self.set_phase(phase)
+
+    # ═══════════════════════════════════════════════════════════════════════════════
+    # NETWORK RESILIENCE EVENTS
+    # ═══════════════════════════════════════════════════════════════════════════════
+
+    def add_retry_activity(
+        self,
+        url: str,
+        attempt_number: int,
+        wait_time: float,
+        reason: str,
+    ) -> None:
+        """Agrega una actividad de reintento al feed.
+
+        Args:
+            url: URL que se está reintentando
+            attempt_number: Número de intento actual
+            wait_time: Tiempo de espera antes del reintento
+            reason: Razón del fallo original
+        """
+        now = time()
+
+        activity = {
+            "url": url,
+            "title": f"Reintento {attempt_number} ({reason})",
+            "engine": f"wait {wait_time:.1f}s",
+            "status": "warning",
+            "elapsed_ms": wait_time * 1000,
+            "size_bytes": 0,
+            "timestamp": now,
+            "phase": "retry",
+        }
+        self._buffer.appendleft(activity)
+
+        # Render inmediatamente para retries (no hay throttle aquí)
+        self._render_visible()
+        self.post_message(
+            self.ActivityAdded(url, f"Reintento {attempt_number}", "network", "warning")
+        )
+
+    def add_circuit_activity(
+        self,
+        domain: str,
+        old_state: str,
+        new_state: str,
+        failure_count: int,
+    ) -> None:
+        """Agrega una actividad de cambio de circuit breaker al feed.
+
+        Args:
+            domain: Dominio afectado
+            old_state: Estado anterior
+            new_state: Nuevo estado
+            failure_count: Cantidad de fallos consecutivos
+        """
+        now = time()
+
+        # Determinar fase según el nuevo estado
+        if new_state == "open":
+            phase = "circuit_open"
+            title = f"Circuit ABIERTO: {domain}"
+            status = "error"
+        elif new_state == "half-open":
+            phase = "circuit_half_open"
+            title = f"Prueba {domain}"
+            status = "warning"
+        else:
+            phase = "idle"
+            title = f"Circuit CERRADO: {domain}"
+            status = "success"
+
+        activity = {
+            "url": domain,
+            "title": title,
+            "engine": f"{failure_count} fallos",
+            "status": status,
+            "elapsed_ms": 0,
+            "size_bytes": 0,
+            "timestamp": now,
+            "phase": phase,
+        }
+        self._buffer.appendleft(activity)
+
+        # Render inmediatamente para cambios de circuit
+        self._render_visible()
+        self.post_message(self.ActivityAdded(domain, title, "circuit_breaker", status))
 
 
 __all__ = ["ActivityFeed", "PHASE_COLORS", "PHASE_ICONS"]

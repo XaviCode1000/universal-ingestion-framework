@@ -40,13 +40,15 @@ from uif_scraper.models import MigrationStatus
 from uif_scraper.navigation import NavigationService
 from uif_scraper.reporter import ReporterService
 from uif_scraper.utils.captcha_detector import CaptchaDetector
-from uif_scraper.utils.circuit_breaker import CircuitBreaker
 from uif_scraper.utils.compression import write_compressed_markdown
 from uif_scraper.utils.html_cleaner import pre_clean_html
 from uif_scraper.utils.http_session import HTTPSessionCache
 from uif_scraper.utils.markdown_utils import enhance_markdown_for_rag
 from uif_scraper.utils.robots_checker import RobotsChecker
 from uif_scraper.utils.url_utils import slugify, smart_url_normalize
+
+# Import para resilient transport (opcional)
+from uif_scraper.utils.circuit_breaker import CircuitBreaker
 
 
 # ============================================================================
@@ -138,6 +140,8 @@ class EngineCore:
         reporter_service: ReporterService,
         extract_assets: bool = True,
         force: bool = False,
+        on_network_retry: Any = None,
+        on_circuit_change: Any = None,
     ) -> None:
         self.config = config
         self.extract_assets = extract_assets
@@ -148,6 +152,10 @@ class EngineCore:
         self.asset_extractor = asset_extractor
         self.navigation = navigation_service
         self.reporter = reporter_service
+
+        # Callbacks de red para resiliencia
+        self._on_network_retry = on_network_retry
+        self._on_circuit_change = on_circuit_change
 
         # Infrastructure
         self.stats = StatsTracker()
@@ -695,6 +703,40 @@ class EngineCore:
                 mode="browser" if self.use_browser_mode else "stealth",
                 previous_state=previous,
                 reason=reason,
+            )
+
+    def _notify_network_retry(
+        self,
+        url: str,
+        attempt_number: int,
+        wait_time: float,
+        reason: str,
+    ) -> None:
+        """Emite evento de retry de red."""
+        # Notificar via callback directo (para ResilientTransport)
+        if self._on_network_retry:
+            self._on_network_retry(url, attempt_number, wait_time, reason)
+
+        # Also notify via UI callback if available
+        if self.ui_callback and hasattr(self.ui_callback, "on_network_retry"):
+            self.ui_callback.on_network_retry(url, attempt_number, wait_time, reason)
+
+    def _notify_circuit_change(
+        self,
+        domain: str,
+        old_state: str,
+        new_state: str,
+        failure_count: int,
+    ) -> None:
+        """Emite evento de cambio de circuit breaker."""
+        # Notificar via callback directo (para ResilientTransport)
+        if self._on_circuit_change:
+            self._on_circuit_change(domain, old_state, new_state, failure_count)
+
+        # Also notify via UI callback if available
+        if self.ui_callback and hasattr(self.ui_callback, "on_circuit_state_change"):
+            self.ui_callback.on_circuit_state_change(
+                domain, old_state, new_state, failure_count
             )
 
     def _update_speed(self) -> None:

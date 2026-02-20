@@ -14,7 +14,9 @@ from uif_scraper.core.engine_core import UICallback
 from uif_scraper.core.types import ActivityEntry, EngineStats
 from uif_scraper.tui.messages import (
     ActivityEvent,
+    CircuitStateEvent,
     ErrorEvent,
+    NetworkRetryEvent,
     ProgressUpdate,
     SpeedUpdate,
     StateChange,
@@ -273,6 +275,64 @@ class TextualUICallback(UICallback):
             cpu_percent=0.0,  # TODO: Implementar
             current_url=self._current_url,
             current_worker=self._current_worker,
+        )
+        self._app.handle_event(event)
+
+    # ═══════════════════════════════════════════════════════════════════════════════
+    # NETWORK RESILIENCE EVENTS
+    # ═══════════════════════════════════════════════════════════════════════════════
+
+    def on_network_retry(
+        self,
+        url: str,
+        attempt_number: int,
+        wait_time: float,
+        reason: str,
+    ) -> None:
+        """Notifica evento de retry de red.
+
+        Args:
+            url: URL que se está reintentando
+            attempt_number: Número de intento
+            wait_time: Tiempo de espera
+            reason: Razón del fallo
+        """
+        event = NetworkRetryEvent(
+            url=url,
+            attempt_number=attempt_number,
+            wait_time=wait_time,
+            reason=reason,
+        )
+        self._app.handle_event(event)
+
+    def on_circuit_state_change(
+        self,
+        domain: str,
+        old_state: str,
+        new_state: str,
+        failure_count: int,
+    ) -> None:
+        """Notifica cambio de estado del circuit breaker.
+
+        Args:
+            domain: Dominio afectado
+            old_state: Estado anterior
+            new_state: Nuevo estado
+            failure_count: Cantidad de fallos
+        """
+        self._circuit_state = new_state
+
+        event = CircuitStateEvent(
+            domain=domain,
+            old_state=cast(
+                Literal["closed", "open", "half-open"],
+                old_state if old_state in ("closed", "open", "half-open") else "closed",
+            ),
+            new_state=cast(
+                Literal["closed", "open", "half-open"],
+                new_state if new_state in ("closed", "open", "half-open") else "closed",
+            ),
+            failure_count=failure_count,
         )
         self._app.handle_event(event)
 

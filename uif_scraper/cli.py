@@ -24,6 +24,11 @@ from uif_scraper.reporter import ReporterService
 from uif_scraper.tui.textual_callback import TextualUICallback
 from uif_scraper.utils.url_utils import slugify
 
+# Import para resilient transport
+from uif_scraper.infrastructure.network.resilient_transport import (
+    create_resilient_transport,
+)
+
 # Catppuccin-themed console
 console = Console()
 
@@ -192,6 +197,35 @@ async def _run_async(
         worker_count=config.default_workers,
     )
 
+    # Create UI callback for event-driven updates
+    ui_callback = TextualUICallback(tui_app)
+
+    # Define network resilience callbacks
+    def on_network_retry(
+        url: str, attempt_number: int, wait_time: float, reason: str
+    ) -> None:
+        """Callback para reintentos de red."""
+        ui_callback.on_network_retry(url, attempt_number, wait_time, reason)
+
+    def on_circuit_change(
+        domain: str, old_state: str, new_state: str, failure_count: int
+    ) -> None:
+        """Callback para cambios de circuit breaker."""
+        ui_callback.on_circuit_state_change(domain, old_state, new_state, failure_count)
+
+    # Create ResilientTransport for network resilience
+    # Note: Currently used for assets; main page fetching uses scrapling
+    _resilient_transport = create_resilient_transport(
+        max_retries=3,
+        base_delay=1.0,
+        max_delay=30.0,
+        jitter=2.0,
+        circuit_threshold=5,
+        circuit_timeout=60.0,
+        on_retry=on_network_retry,
+        on_circuit_change=on_circuit_change,
+    )
+
     # Create EngineCore directly with all dependencies
     core = EngineCore(
         config=config,
@@ -202,10 +236,12 @@ async def _run_async(
         navigation_service=navigation_service,
         reporter_service=reporter_service,
         extract_assets=mission_extract_assets,
+        on_network_retry=on_network_retry,
+        on_circuit_change=on_circuit_change,
     )
 
     # Set up UI callback for event-driven updates
-    core.ui_callback = TextualUICallback(tui_app)
+    core.ui_callback = ui_callback
 
     # Register pause/resume handler
     def handle_pause(is_paused: bool) -> None:
