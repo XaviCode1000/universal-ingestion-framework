@@ -214,7 +214,7 @@ async def _run_async(
         ui_callback.on_circuit_state_change(domain, old_state, new_state, failure_count)
 
     # Create ResilientTransport for network resilience
-    # Note: Currently used for assets; main page fetching uses scrapling
+    # Note: This transport handles retries, circuit breaker, and TUI callbacks
     _resilient_transport = create_resilient_transport(
         max_retries=3,
         base_delay=1.0,
@@ -238,6 +238,7 @@ async def _run_async(
         extract_assets=mission_extract_assets,
         on_network_retry=on_network_retry,
         on_circuit_change=on_circuit_change,
+        resilient_transport=_resilient_transport,  # ✅ INYECTADO: Motor de resiliencia
     )
 
     # Set up UI callback for event-driven updates

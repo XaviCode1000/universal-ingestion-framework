@@ -148,6 +148,7 @@ class EngineCore:
         force: bool = False,
         on_network_retry: Any = None,
         on_circuit_change: Any = None,
+        resilient_transport: Any = None,  # httpx.AsyncBaseTransport para resiliencia
     ) -> None:
         self.config = config
         self.extract_assets = extract_assets
@@ -158,6 +159,9 @@ class EngineCore:
         self.asset_extractor = asset_extractor
         self.navigation = navigation_service
         self.reporter = reporter_service
+
+        # Resilient Transport (httpx con retries + circuit breaker)
+        self.resilient_transport = resilient_transport
 
         # Callbacks de red para resiliencia
         self._on_network_retry = on_network_retry
