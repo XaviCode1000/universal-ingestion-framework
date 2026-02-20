@@ -229,7 +229,9 @@ async def test_open_graph_missing_fields(extractor: MetadataExtractor) -> None:
 async def test_extract_twitter_cards(extractor: MetadataExtractor) -> None:
     """Valida extracción de Twitter Card tags."""
     # Usar HTML completo que tiene author y sitename definidos
-    metadata = await extractor.extract(HTML_WITH_FULL_META, "https://example.com/twitter")
+    metadata = await extractor.extract(
+        HTML_WITH_FULL_META, "https://example.com/twitter"
+    )
 
     assert metadata["twitter_card"] == "summary_large_image"
     assert metadata["twitter_site"] == "@testsite"
@@ -292,7 +294,9 @@ async def test_meta_description_missing(extractor: MetadataExtractor) -> None:
 async def test_extract_json_ld(extractor: MetadataExtractor) -> None:
     """Valida parsing de JSON-LD schema.org."""
     # Usar HTML completo que tiene author y sitename definidos
-    metadata = await extractor.extract(HTML_WITH_FULL_META, "https://example.com/jsonld")
+    metadata = await extractor.extract(
+        HTML_WITH_FULL_META, "https://example.com/jsonld"
+    )
 
     assert metadata["json_ld"] is not None
     assert metadata["json_ld"]["@type"] == "TechArticle"
@@ -341,7 +345,9 @@ async def test_json_ld_missing(extractor: MetadataExtractor) -> None:
 @pytest.mark.asyncio
 async def test_extract_headers_for_toc(extractor: MetadataExtractor) -> None:
     """Valida extracción de H1-H6 con niveles."""
-    metadata = await extractor.extract(HTML_WITH_FULL_META, "https://example.com/headers")
+    metadata = await extractor.extract(
+        HTML_WITH_FULL_META, "https://example.com/headers"
+    )
 
     headers = metadata["headers"]
 
@@ -525,14 +531,18 @@ async def test_metadata_extractor_cache() -> None:
     extractor = MetadataExtractor(cache_size=10)
 
     # Primera extracción (cache miss)
-    metadata1 = await extractor.extract(HTML_WITH_FULL_META, "https://example.com/test1")
+    metadata1 = await extractor.extract(
+        HTML_WITH_FULL_META, "https://example.com/test1"
+    )
 
     cache_info_before = extractor.get_cache_info()
     # Después de la primera extracción, deberíamos tener al menos 1 miss
     assert cache_info_before["misses"] >= 1 or cache_info_before["hits"] >= 0
 
     # Segunda extracción con mismo contenido (mismo hash = cache hit)
-    metadata2 = await extractor.extract(HTML_WITH_FULL_META, "https://example.com/test2")
+    metadata2 = await extractor.extract(
+        HTML_WITH_FULL_META, "https://example.com/test2"
+    )
 
     cache_info_after = extractor.get_cache_info()
     # El cache debería haber sido usado (hits o currsize > 0)

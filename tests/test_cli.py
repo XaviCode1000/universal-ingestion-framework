@@ -23,7 +23,7 @@ async def test_cli_help():
 @pytest.mark.asyncio
 async def test_cli_scrape_missing_url():
     """Test that scrape command requires URL or --setup."""
-    result = runner.invoke(app, ["scrape"])
+    runner.invoke(app, ["scrape"])
     # Should fail or show help since URL is required
     # (or prompt for URL in interactive mode)
     # The exact behavior depends on typer configuration

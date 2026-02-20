@@ -132,9 +132,7 @@ class StateManager:
     async def exists(self, url: str) -> bool:
         """Verifica si una URL ya existe en la base de datos."""
         async with self.pool.acquire() as db:
-            async with db.execute(
-                "SELECT 1 FROM urls WHERE url = ?", (url,)
-            ) as cursor:
+            async with db.execute("SELECT 1 FROM urls WHERE url = ?", (url,)) as cursor:
                 return await cursor.fetchone() is not None
 
     async def get_total_count(self, m_type: str = "webpage") -> int:
@@ -228,7 +226,7 @@ class StateManager:
                 if row:
                     await db.commit()
                     return int(row[0])
-            
+
             # Fallback para versiones antiguas de SQLite (aunque uv suele traer modernas)
             await db.execute(
                 "UPDATE urls SET retries = retries + 1, last_try = CURRENT_TIMESTAMP WHERE url = ?",
@@ -242,7 +240,11 @@ class StateManager:
                 return row[0] if row else 0
 
     async def get_pending_urls(
-        self, m_type: str = "webpage", max_retries: int = 3, limit: int = 1000, offset: int = 0
+        self,
+        m_type: str = "webpage",
+        max_retries: int = 3,
+        limit: int = 1000,
+        offset: int = 0,
     ) -> list[str]:
         """Obtiene URLs pendientes o fallidas con reintentos disponibles."""
         async with self.pool.acquire() as db:
@@ -286,7 +288,9 @@ class StateManager:
             async with db.execute(query) as cursor:
                 rows = await cursor.fetchall()
                 self._stats_cache = {str(row[0]): int(row[1]) for row in rows}
-                self._stats_cache["total_webpages"] = await self.get_total_count("webpage")
+                self._stats_cache["total_webpages"] = await self.get_total_count(
+                    "webpage"
+                )
                 self._stats_cache["total_assets"] = await self.get_total_count("asset")
                 self._stats_cached_at = now
                 return self._stats_cache

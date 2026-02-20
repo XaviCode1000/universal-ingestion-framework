@@ -60,7 +60,9 @@ class RobotsChecker:
                             # Otros errores (404, etc.) suelen implicar que se permite todo
                             parser.allow_all = True
                 except Exception as e:
-                    logger.warning(f"Error cargando robots.txt para {domain}: {str(e)[:100]}")
+                    logger.warning(
+                        f"Error cargando robots.txt para {domain}: {str(e)[:100]}"
+                    )
                     # En caso de error, permitimos por defecto para no bloquear si el sitio está caído
                     parser.allow_all = True
 

@@ -127,16 +127,40 @@ class MetadataExtractor(IExtractor):
         # html-to-markdown pone OG data en nested dict: document.open_graph
         og_data = doc_meta.get("open_graph", {}) or {}
         og_title = og_data.get("title") if isinstance(og_data, dict) else None
-        og_description = og_data.get("description") if isinstance(og_data, dict) else doc_meta.get("og_description")
-        og_image = og_data.get("image") if isinstance(og_data, dict) else doc_meta.get("og_image")
-        og_type = og_data.get("type") if isinstance(og_data, dict) else doc_meta.get("og_type")
+        og_description = (
+            og_data.get("description")
+            if isinstance(og_data, dict)
+            else doc_meta.get("og_description")
+        )
+        og_image = (
+            og_data.get("image")
+            if isinstance(og_data, dict)
+            else doc_meta.get("og_image")
+        )
+        og_type = (
+            og_data.get("type")
+            if isinstance(og_data, dict)
+            else doc_meta.get("og_type")
+        )
 
         # === TWITTER CARDS ===
         # html-to-markdown pone Twitter data en nested dict: document.twitter_card
         twitter_data = doc_meta.get("twitter_card", {}) or {}
-        twitter_card = twitter_data.get("card") if isinstance(twitter_data, dict) else doc_meta.get("twitter_card")
-        twitter_site = twitter_data.get("site") if isinstance(twitter_data, dict) else doc_meta.get("twitter_site")
-        twitter_title = twitter_data.get("title") if isinstance(twitter_data, dict) else doc_meta.get("twitter_title")
+        twitter_card = (
+            twitter_data.get("card")
+            if isinstance(twitter_data, dict)
+            else doc_meta.get("twitter_card")
+        )
+        twitter_site = (
+            twitter_data.get("site")
+            if isinstance(twitter_data, dict)
+            else doc_meta.get("twitter_site")
+        )
+        twitter_title = (
+            twitter_data.get("title")
+            if isinstance(twitter_data, dict)
+            else doc_meta.get("twitter_title")
+        )
 
         # === TÍTULO ===
         # Prioridad: OG title > title tag > "Documento" (los tests esperan OG primero)
