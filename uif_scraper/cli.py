@@ -207,6 +207,16 @@ async def _run_async(
     # Set up UI callback for event-driven updates
     core.ui_callback = TextualUICallback(tui_app)
 
+    # Register pause/resume handler
+    def handle_pause(is_paused: bool) -> None:
+        """Handler para pause/resume desde la TUI."""
+        if is_paused:
+            core.pause()
+        else:
+            core.resume()
+
+    tui_app.register_command_handler("pause", handle_pause)
+
     # Pass core.run as the engine factory
     tui_app._engine_factory = core.run
 

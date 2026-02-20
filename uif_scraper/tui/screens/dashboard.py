@@ -42,7 +42,7 @@ class DashboardScreen(Screen):
 
     DEFAULT_CSS = """
     DashboardScreen {
-        background: $base;
+        /* Background heredado de Screen en mocha.tcss */
     }
 
     #main-container {
@@ -59,12 +59,12 @@ class DashboardScreen(Screen):
     #content-area {
         height: 1fr;
         layout: horizontal;
-        gap: 1;
     }
 
     #progress-panel {
         width: 40%;
         min-width: 35;
+        margin-right: 1;
     }
 
     #activity-feed {
@@ -75,18 +75,6 @@ class DashboardScreen(Screen):
     #status-bar-container {
         height: auto;
         margin-top: 1;
-    }
-
-    /* Responsive: apilar verticalmente en terminales pequeñas */
-    @media (max-width: 80) {
-        #content-area {
-            layout: vertical;
-        }
-
-        #progress-panel, #activity-feed {
-            width: 100%;
-            min-width: 0;
-        }
     }
     """
 

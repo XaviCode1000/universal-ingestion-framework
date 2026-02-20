@@ -17,36 +17,7 @@ if TYPE_CHECKING:
 class CurrentURLDisplay(Static):
     """Widget de alta visibilidad para la URL actual siendo procesada."""
 
-    DEFAULT_CSS = """
-    CurrentURLDisplay {
-        width: 100%;
-        height: 3;
-        background: $surface1;
-        padding: 0 1;
-        margin: 0 1;
-        border-left: thick $mauve;
-        color: $text;
-    }
-
-    CurrentURLDisplay.processing {
-        border-left: thick $blue;
-        background: $surface1;
-    }
-
-    CurrentURLDisplay.idle {
-        border-left: thick $subtext0;
-        background: $surface0;
-    }
-
-    CurrentURLDisplay.error {
-        border-left: thick $red;
-        background: $surface0;
-    }
-
-    CurrentURLDisplay.paused {
-        border-left: thick $yellow;
-    }
-    """
+    # CSS movido a mocha.tcss para usar variables
 
     # Reactive props con init=False para evitar watchers en __init__
     url: reactive[str] = reactive("", init=False)

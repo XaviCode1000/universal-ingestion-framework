@@ -14,6 +14,7 @@ from uif_scraper.core.engine_core import UICallback
 from uif_scraper.core.types import ActivityEntry, EngineStats
 from uif_scraper.tui.messages import (
     ActivityEvent,
+    ErrorEvent,
     ProgressUpdate,
     SpeedUpdate,
     StateChange,
@@ -133,6 +134,64 @@ class TextualUICallback(UICallback):
         self._circuit_state = state
         self._send_system_status()
 
+    def on_error(
+        self, url: str, error_type: str, message: str, retry_count: int = 0
+    ) -> None:
+        """Notificar error de procesamiento (sin throttle).
+
+        Args:
+            url: URL que falló
+            error_type: Tipo de error (TimeoutError, ConnectionError, etc.)
+            message: Mensaje de error
+            retry_count: Número de reintentos
+        """
+        self._error_count += 1
+
+        event = ErrorEvent(
+            url=url,
+            error_type=error_type,
+            error_message=message[:500],  # Truncar
+            retry_count=retry_count,
+            is_fatal=retry_count >= 3,  # TODO: usar config.max_retries
+        )
+        self._app.handle_event(event)
+
+    def on_state_change(
+        self,
+        state: str,
+        mode: str,
+        previous_state: str | None,
+        reason: str | None,
+    ) -> None:
+        """Notifica cambio de estado del engine.
+
+        Args:
+            state: Nuevo estado (starting, running, paused, stopping, stopped, error)
+            mode: Modo actual (stealth, browser)
+            previous_state: Estado anterior
+            reason: Razón del cambio
+        """
+        # Validar y castear tipos
+        valid_states = ("starting", "running", "paused", "stopping", "stopped", "error")
+        valid_modes = ("stealth", "browser")
+
+        state_literal = cast(
+            Literal["starting", "running", "paused", "stopping", "stopped", "error"],
+            state if state in valid_states else "running",
+        )
+        mode_literal = cast(
+            Literal["stealth", "browser"],
+            mode if mode in valid_modes else "stealth",
+        )
+
+        event = StateChange(
+            state=state_literal,
+            mode=mode_literal,
+            previous_state=previous_state,
+            reason=reason,
+        )
+        self._app.handle_event(event)
+
     def update_current_url(self, url: str, worker_id: int) -> None:
         """Actualiza la URL siendo procesada actualmente.
 
@@ -178,42 +237,6 @@ class TextualUICallback(UICallback):
                 speed_history=list(self._speed_history),
             )
             self._app.handle_event(event)
-
-    def notify_state_change(
-        self,
-        state: str,
-        mode: str,
-        previous_state: str | None = None,
-        reason: str | None = None,
-    ) -> None:
-        """Notifica cambio de estado del engine.
-
-        Args:
-            state: Nuevo estado (starting, running, paused, stopping, stopped, error)
-            mode: Modo actual (stealth, browser)
-            previous_state: Estado anterior
-            reason: Razón del cambio
-        """
-        # Validar y castear tipos
-        valid_states = ("starting", "running", "paused", "stopping", "stopped", "error")
-        valid_modes = ("stealth", "browser")
-
-        state_literal = cast(
-            Literal["starting", "running", "paused", "stopping", "stopped", "error"],
-            state if state in valid_states else "running",
-        )
-        mode_literal = cast(
-            Literal["stealth", "browser"],
-            mode if mode in valid_modes else "stealth",
-        )
-
-        event = StateChange(
-            state=state_literal,
-            mode=mode_literal,
-            previous_state=previous_state,
-            reason=reason,
-        )
-        self._app.handle_event(event)
 
     def _send_system_status(self) -> None:
         """Envía el estado completo del sistema."""

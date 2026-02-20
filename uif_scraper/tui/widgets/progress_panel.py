@@ -29,71 +29,7 @@ class LiveProgressPanel(Vertical):
     de forma eficiente con caching de referencias.
     """
 
-    DEFAULT_CSS = """
-    LiveProgressPanel {
-        width: 1fr;
-        height: 1fr;
-        min-width: 30;
-        min-height: 14;
-        background: $surface0;
-        border: round $surface1;
-        padding: 1;
-    }
-
-    LiveProgressPanel .panel-title {
-        color: $mauve;
-        text-style: bold;
-        margin-bottom: 1;
-    }
-
-    LiveProgressPanel .progress-section {
-        margin-bottom: 1;
-        height: auto;
-    }
-
-    LiveProgressPanel .progress-label {
-        color: $subtext1;
-        margin-bottom: 0;
-    }
-
-    LiveProgressPanel .progress-stats {
-        color: $text;
-        margin-top: 0;
-        height: 1;
-    }
-
-    LiveProgressPanel .metrics-box {
-        background: $surface1;
-        padding: 1;
-        margin-top: 1;
-    }
-
-    LiveProgressPanel .metric-row {
-        height: 1;
-    }
-
-    LiveProgressPanel .metric-label {
-        color: $subtext0;
-    }
-
-    LiveProgressPanel .metric-value {
-        color: $lavender;
-        text-style: bold;
-    }
-
-    LiveProgressPanel .eta-range {
-        color: $yellow;
-    }
-
-    LiveProgressPanel .sparkline-container {
-        margin-top: 1;
-        height: 3;
-    }
-
-    LiveProgressPanel ProgressBar {
-        margin-top: 0;
-    }
-    """
+    # CSS movido a mocha.tcss para usar variables
 
     # ═══════════════════════════════════════════════════════════════════════════
     # REACTIVE PROPS

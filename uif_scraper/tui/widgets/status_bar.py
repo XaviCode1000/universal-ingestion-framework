@@ -31,67 +31,7 @@ class SystemStatusBar(Vertical):
     - Actualización eficiente con caching
     """
 
-    DEFAULT_CSS = """
-    SystemStatusBar {
-        width: 100%;
-        height: auto;
-        min-height: 2;
-        background: $surface0;
-        border: round $surface1;
-        padding: 0 1;
-        margin: 0 1;
-    }
-
-    SystemStatusBar .status-row {
-        height: 1;
-        layout: horizontal;
-    }
-
-    SystemStatusBar .status-item {
-        margin-right: 2;
-        min-width: 6;
-    }
-
-    SystemStatusBar .status-label {
-        color: $subtext0;
-    }
-
-    SystemStatusBar .status-value {
-        color: $text;
-        text-style: bold;
-    }
-
-    /* Circuit breaker states */
-    SystemStatusBar .circuit-closed { color: $green; }
-    SystemStatusBar .circuit-open { color: $red; }
-    SystemStatusBar .circuit-half-open { color: $yellow; }
-
-    /* Queue states */
-    SystemStatusBar .queue-ok { color: $green; }
-    SystemStatusBar .queue-warning { color: $yellow; }
-    SystemStatusBar .queue-high { color: $red; }
-
-    /* Error states */
-    SystemStatusBar .errors-none { color: $green; }
-    SystemStatusBar .errors-some { color: $yellow; }
-    SystemStatusBar .errors-high { color: $red; }
-
-    /* Memory states */
-    SystemStatusBar .memory-ok { color: $text; }
-    SystemStatusBar .memory-warning { color: $yellow; }
-    SystemStatusBar .memory-high { color: $red; }
-
-    /* CPU states */
-    SystemStatusBar .cpu-ok { color: $text; }
-    SystemStatusBar .cpu-warning { color: $yellow; }
-    SystemStatusBar .cpu-high { color: $red; }
-
-    SystemStatusBar .current-url {
-        color: $subtext1;
-        text-overflow: ellipsis;
-        margin-top: 1;
-    }
-    """
+    # CSS movido a mocha.tcss para usar variables
 
     # ═══════════════════════════════════════════════════════════════════════════
     # REACTIVE PROPS

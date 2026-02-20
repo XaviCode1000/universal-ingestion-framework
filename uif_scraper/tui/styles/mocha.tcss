@@ -250,3 +250,260 @@ Tooltip {
     color: $text;
     border: solid $surface2;
 }
+
+/* ═══════════════════════════════════════════════════════════════════════════════
+   WIDGET STYLES - UIF Dashboard Widgets
+   ═══════════════════════════════════════════════════════════════════════════════ */
+
+/* CurrentURLDisplay Widget */
+CurrentURLDisplay {
+    width: 100%;
+    height: 3;
+    background: $surface1;
+    padding: 0 1;
+    margin: 0 1;
+    border-left: thick $mauve;
+    color: $text;
+}
+
+CurrentURLDisplay.processing {
+    border-left: thick $blue;
+    background: $surface1;
+}
+
+CurrentURLDisplay.idle {
+    border-left: thick $subtext0;
+    background: $surface0;
+}
+
+CurrentURLDisplay.error {
+    border-left: thick $red;
+    background: $surface0;
+}
+
+CurrentURLDisplay.paused {
+    border-left: thick $yellow;
+}
+
+/* ActivityFeed Widget */
+ActivityFeed {
+    width: 1fr;
+    height: 1fr;
+    min-width: 35;
+    min-height: 10;
+    background: $surface0;
+    border: round $surface1;
+    padding: 1;
+}
+
+ActivityFeed .panel-title {
+    color: $green;
+    text-style: bold;
+    margin-bottom: 1;
+}
+
+ActivityFeed VerticalScroll {
+    height: 1fr;
+}
+
+ActivityFeed .activity-line {
+    height: 2;
+    padding: 0 1;
+    margin-bottom: 1;
+}
+
+ActivityFeed .activity-line:odd {
+    background: $surface1;
+}
+
+ActivityFeed .activity-title {
+    color: $text;
+    text-style: bold;
+}
+
+ActivityFeed .activity-meta {
+    color: $subtext0;
+}
+
+ActivityFeed .engine-success {
+    color: $green;
+}
+
+ActivityFeed .engine-warning {
+    color: $yellow;
+}
+
+ActivityFeed .engine-error {
+    color: $red;
+}
+
+ActivityFeed .empty-state {
+    color: $subtext0;
+    text-align: center;
+    padding: 2;
+}
+
+/* LiveProgressPanel Widget */
+LiveProgressPanel {
+    width: 1fr;
+    height: 1fr;
+    min-width: 30;
+    min-height: 14;
+    background: $surface0;
+    border: round $surface1;
+    padding: 1;
+}
+
+LiveProgressPanel .panel-title {
+    color: $mauve;
+    text-style: bold;
+    margin-bottom: 1;
+}
+
+LiveProgressPanel .progress-section {
+    margin-bottom: 1;
+    height: auto;
+}
+
+LiveProgressPanel .progress-label {
+    color: $subtext1;
+    margin-bottom: 0;
+}
+
+LiveProgressPanel .progress-stats {
+    color: $text;
+    margin-top: 0;
+    height: 1;
+}
+
+LiveProgressPanel .metrics-box {
+    background: $surface1;
+    padding: 1;
+    margin-top: 1;
+}
+
+LiveProgressPanel .metric-row {
+    height: 1;
+}
+
+LiveProgressPanel .metric-label {
+    color: $subtext0;
+}
+
+LiveProgressPanel .metric-value {
+    color: $lavender;
+    text-style: bold;
+}
+
+LiveProgressPanel .eta-range {
+    color: $yellow;
+}
+
+LiveProgressPanel .sparkline-container {
+    margin-top: 1;
+    height: 3;
+}
+
+LiveProgressPanel ProgressBar {
+    margin-top: 0;
+}
+
+/* SystemStatusBar Widget */
+SystemStatusBar {
+    width: 100%;
+    height: auto;
+    min-height: 2;
+    background: $surface0;
+    border: round $surface1;
+    padding: 0 1;
+    margin: 0 1;
+}
+
+SystemStatusBar .status-row {
+    height: 1;
+    layout: horizontal;
+}
+
+SystemStatusBar .status-item {
+    margin-right: 2;
+    min-width: 6;
+}
+
+SystemStatusBar .status-label {
+    color: $subtext0;
+}
+
+SystemStatusBar .status-value {
+    color: $text;
+    text-style: bold;
+}
+
+/* Circuit breaker states */
+SystemStatusBar .circuit-closed { color: $green; }
+SystemStatusBar .circuit-open { color: $red; }
+SystemStatusBar .circuit-half-open { color: $yellow; }
+
+/* Queue states */
+SystemStatusBar .queue-ok { color: $green; }
+SystemStatusBar .queue-warning { color: $yellow; }
+SystemStatusBar .queue-high { color: $red; }
+
+/* Error states */
+SystemStatusBar .errors-none { color: $green; }
+SystemStatusBar .errors-some { color: $yellow; }
+SystemStatusBar .errors-high { color: $red; }
+
+/* Memory states */
+SystemStatusBar .memory-ok { color: $text; }
+SystemStatusBar .memory-warning { color: $yellow; }
+SystemStatusBar .memory-high { color: $red; }
+
+/* CPU states */
+SystemStatusBar .cpu-ok { color: $text; }
+SystemStatusBar .cpu-warning { color: $yellow; }
+SystemStatusBar .cpu-high { color: $red; }
+
+SystemStatusBar .current-url {
+    color: $subtext1;
+    text-overflow: ellipsis;
+    margin-top: 1;
+}
+
+/* Sparkline Widget */
+Sparkline {
+    width: 1fr;
+    height: 3;
+    padding: 0 1;
+}
+
+Sparkline .sparkline-row {
+    height: 1;
+}
+
+Sparkline .axis-label {
+    color: $subtext0;
+    text-align: right;
+    width: 5;
+}
+
+Sparkline .chart {
+    color: $mauve;
+}
+
+Sparkline .time-label {
+    color: $subtext0;
+    text-align: center;
+    height: 1;
+}
+
+/* MultiSparkline Widget */
+MultiSparkline {
+    width: 1fr;
+    height: auto;
+    padding: 0 1;
+}
+
+MultiSparkline .sparkline-row {
+    height: 1;
+    margin-bottom: 0;
+}

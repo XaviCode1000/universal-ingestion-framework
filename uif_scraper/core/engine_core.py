@@ -85,14 +85,43 @@ QueueItem = str | _Sentinel
 
 
 class UICallback(ABC):
+    """Interfaz para callbacks de UI del EngineCore.
+
+    Todos los métodos son opcionales en las implementaciones concretas.
+    Los eventos se emiten de forma no bloqueante.
+    """
+
     @abstractmethod
-    def on_progress(self, stats: EngineStats) -> None: ...
+    def on_progress(self, stats: EngineStats) -> None:
+        """Notifica progreso del scraping (throttled)."""
+        ...
+
     @abstractmethod
-    def on_activity(self, entry: ActivityEntry) -> None: ...
+    def on_activity(self, entry: ActivityEntry) -> None:
+        """Notifica actividad de página procesada."""
+        ...
+
     @abstractmethod
-    def on_mode_change(self, browser_mode: bool) -> None: ...
+    def on_mode_change(self, browser_mode: bool) -> None:
+        """Notifica cambio de modo stealth ↔ browser."""
+        ...
+
     @abstractmethod
-    def on_circuit_change(self, state: str) -> None: ...
+    def on_circuit_change(self, state: str) -> None:
+        """Notifica cambio de estado del circuit breaker."""
+        ...
+
+    @abstractmethod
+    def on_error(self, url: str, error_type: str, message: str) -> None:
+        """Notifica error de procesamiento (sin throttle)."""
+        ...
+
+    @abstractmethod
+    def on_state_change(
+        self, state: str, mode: str, previous_state: str | None, reason: str | None
+    ) -> None:
+        """Notifica cambio de estado del engine."""
+        ...
 
 
 class EngineCore:
@@ -151,9 +180,19 @@ class EngineCore:
         self.activity_log: list[dict[str, Any]] = []
         self.start_time: float = 0
         self._shutdown_event = asyncio.Event()
+        self._pause_event = asyncio.Event()  # Para pause/resume real
+        self._pause_event.set()  # Inicia despausado
+        self._engine_state: str = (
+            "starting"  # starting, running, paused, stopping, stopped, error
+        )
         self._page_workers: list[asyncio.Task[None]] = []
         self._asset_workers: list[asyncio.Task[None]] = []
         self.ui_callback: UICallback | None = None
+
+        # Speed tracking
+        self._last_speed_check: float = 0.0
+        self._pages_since_last_check: int = 0
+        self._current_speed: float = 0.0
 
     def get_stats(self) -> EngineStats:
         self.stats.seen_urls_count = len(self.seen_urls)
@@ -218,12 +257,15 @@ class EngineCore:
             self.stats.pages_total_count += 1
 
     async def run(self) -> None:
+        """Ejecuta el engine principal con soporte para pause/resume."""
         try:
             await self.setup()
         except RuntimeError:
             return
 
         self.start_time = asyncio.get_event_loop().time()
+        self._last_speed_check = self.start_time
+        self._notify_state_change("running", reason="mission_started")
         self._notify_ui()
 
         async with AsyncStealthySession(
@@ -246,7 +288,14 @@ class EngineCore:
             try:
                 checks = 0
                 while not self._shutdown_event.is_set():
+                    # Verificar si está pausado
+                    if not self._pause_event.is_set():
+                        # Esperar a que se reanude
+                        await self._pause_event.wait()
+
                     self._notify_ui()
+                    self._update_speed()
+
                     if (self.url_queue.qsize() + self.asset_queue.qsize()) == 0:
                         checks += 1
                         if checks >= 5:
@@ -260,11 +309,13 @@ class EngineCore:
                     await self.asset_queue.join()
 
             finally:
+                self._notify_state_change("stopping", reason="mission_completed")
                 await self._graceful_shutdown(all_workers)
                 await self.state.release_mission_lock(
                     self.navigation.domain, os.getpid()
                 )
 
+        self._notify_state_change("stopped", reason="mission_completed")
         await self.reporter.generate_summary()
         await self.http_cache.close()
 
@@ -329,11 +380,17 @@ class EngineCore:
                 self.asset_queue.task_done()
 
     async def _process_page(self, session: AsyncStealthySession, url: str) -> None:
+        """Procesa una página: fetch, extract, save, notify."""
+        # Esperar si está pausado
+        await self._pause_event.wait()
+
         if not await self.robots_checker.can_fetch(url):
             await self.state.update_status(
                 url, MigrationStatus.SKIPPED_ROBOTS, "Blocked by robots.txt"
             )
             return
+
+        start_time = asyncio.get_event_loop().time()
 
         try:
             page = await self._fetch_page(session, url)
@@ -365,6 +422,21 @@ class EngineCore:
 
             await self.state.update_status(url, MigrationStatus.COMPLETED)
             self.stats.record_page_success()
+
+            # Emitir actividad
+            elapsed_ms = (asyncio.get_event_loop().time() - start_time) * 1000
+            self._notify_activity(
+                url=url,
+                title=metadata.get("title", url),
+                engine=text_data.get("engine", "unknown"),
+                status="success",
+                elapsed_ms=elapsed_ms,
+                size_bytes=len(raw_html),
+            )
+
+            # Actualizar velocidad
+            self._pages_since_last_check += 1
+            self._update_speed()
             self._notify_ui()
 
         except Exception as e:
@@ -475,8 +547,21 @@ class EngineCore:
                 tg.create_task(self.asset_queue.put(a))
 
     async def _handle_page_error(self, url: str, error: Exception) -> None:
+        """Maneja errores de procesamiento de página."""
         self.circuit_breaker.record_failure(self.navigation.domain)
         retries = await self.state.increment_retry(url)
+
+        # Emitir evento de error
+        error_type = type(error).__name__
+        error_msg = str(error)[:500]  # Truncar a 500 chars
+        self._notify_error(
+            url=url,
+            error_type=error_type,
+            message=error_msg,
+            retry_count=retries,
+            is_fatal=retries >= self.config.max_retries,
+        )
+
         if retries < self.config.max_retries:
             await asyncio.sleep(float(2**retries))
             await self.url_queue.put(url)
@@ -507,3 +592,131 @@ class EngineCore:
     def _notify_mode_change(self) -> None:
         if self.ui_callback:
             self.ui_callback.on_mode_change(self.use_browser_mode)
+
+    def _notify_activity(
+        self,
+        url: str,
+        title: str,
+        engine: str,
+        status: str,
+        elapsed_ms: float,
+        size_bytes: int = 0,
+    ) -> None:
+        """Emite evento de actividad cuando se procesa una página."""
+        now = asyncio.get_event_loop().time()
+
+        if self.ui_callback:
+            entry = ActivityEntry(title=title, engine=engine, timestamp=now)
+            self.ui_callback.on_activity(entry)
+
+        # También agregar al log interno
+        self.activity_log.append(
+            {
+                "url": url,
+                "title": title,
+                "engine": engine,
+                "status": status,
+                "time": asyncio.get_event_loop().time(),
+                "elapsed_ms": elapsed_ms,
+                "size_bytes": size_bytes,
+            }
+        )
+
+    def _notify_error(
+        self,
+        url: str,
+        error_type: str,
+        message: str,
+        retry_count: int = 0,
+        is_fatal: bool = False,
+    ) -> None:
+        """Emite evento de error (sin throttle)."""
+        if self.ui_callback:
+            self.ui_callback.on_error(url, error_type, message)
+
+    def _notify_state_change(self, new_state: str, reason: str | None = None) -> None:
+        """Emite evento de cambio de estado del engine."""
+        previous = self._engine_state
+        self._engine_state = new_state
+
+        if self.ui_callback:
+            self.ui_callback.on_state_change(
+                state=new_state,
+                mode="browser" if self.use_browser_mode else "stealth",
+                previous_state=previous,
+                reason=reason,
+            )
+
+    def _update_speed(self) -> None:
+        """Actualiza métricas de velocidad cada segundo."""
+        now = asyncio.get_event_loop().time()
+
+        if now - self._last_speed_check >= 1.0:
+            elapsed = now - self._last_speed_check
+            if elapsed > 0:
+                self._current_speed = self._pages_since_last_check / elapsed
+            self._pages_since_last_check = 0
+            self._last_speed_check = now
+
+    def pause(self) -> None:
+        """Pausa el engine (no bloqueante)."""
+        self._pause_event.clear()
+        self._notify_state_change("paused", reason="user_request")
+
+    def resume(self) -> None:
+        """Reanuda el engine después de pausa."""
+        self._pause_event.set()
+        self._notify_state_change("running", reason="user_request")
+
+    def is_paused(self) -> bool:
+        """Retorna True si el engine está pausado."""
+        return not self._pause_event.is_set()
+
+    def get_queue_status(self) -> list[dict[str, Any]]:
+        """Retorna el estado de las URLs en la cola.
+
+        Returns:
+            Lista de diccionarios con: url, status, retries, error
+        """
+        # Obtener URLs del activity log reciente
+        status_list = []
+
+        # URLs completadas (del activity log)
+        seen_urls = set()
+        for entry in self.activity_log[-100:]:  # Últimas 100
+            url = entry.get("url", "")
+            if url and url not in seen_urls:
+                seen_urls.add(url)
+                status_list.append(
+                    {
+                        "url": url,
+                        "status": entry.get("status", "completed"),
+                        "retries": 0,
+                        "error": None,
+                        "engine": entry.get("engine", "unknown"),
+                        "elapsed_ms": entry.get("elapsed_ms", 0),
+                    }
+                )
+
+        return status_list
+
+    def get_error_list(self) -> list[dict[str, Any]]:
+        """Retorna la lista de errores recientes.
+
+        Returns:
+            Lista de diccionarios con: url, error_type, error_message, retry_count
+        """
+        # Por ahora retornamos errores del activity log con status error
+        errors = []
+        for entry in self.activity_log[-50:]:
+            if entry.get("status") == "error":
+                errors.append(
+                    {
+                        "url": entry.get("url", ""),
+                        "error_type": "ProcessingError",
+                        "error_message": entry.get("error", "Unknown error"),
+                        "retry_count": 0,
+                        "timestamp": entry.get("time", 0),
+                    }
+                )
+        return errors

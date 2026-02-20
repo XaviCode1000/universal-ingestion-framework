@@ -21,33 +21,7 @@ class Sparkline(Static):
                   last 60s
     """
 
-    DEFAULT_CSS = """
-    Sparkline {
-        width: 1fr;
-        height: 3;
-        padding: 0 1;
-    }
-
-    Sparkline .sparkline-row {
-        height: 1;
-    }
-
-    Sparkline .axis-label {
-        color: $subtext0;
-        text-align: right;
-        width: 5;
-    }
-
-    Sparkline .chart {
-        color: $mauve;
-    }
-
-    Sparkline .time-label {
-        color: $subtext0;
-        text-align: center;
-        height: 1;
-    }
-    """
+    # CSS movido a mocha.tcss para usar variables
 
     # Caracteres para diferentes alturas (8 niveles)
     CHARS = " ▁▂▃▄▅▆▇█"
@@ -160,18 +134,7 @@ class MultiSparkline(Static):
         Assets┤ ▄▅▆▇█▇▆▅▄▃▂▁
     """
 
-    DEFAULT_CSS = """
-    MultiSparkline {
-        width: 1fr;
-        height: auto;
-        padding: 0 1;
-    }
-
-    MultiSparkline .sparkline-row {
-        height: 1;
-        margin-bottom: 0;
-    }
-    """
+    # CSS movido a mocha.tcss para usar variables
 
     # Reactive props
     datasets: reactive[dict[str, list[float]]] = reactive(dict)

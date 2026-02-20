@@ -32,64 +32,7 @@ class ActivityFeed(Vertical):
     - Timestamps relativos actualizados
     """
 
-    DEFAULT_CSS = """
-    ActivityFeed {
-        width: 1fr;
-        height: 1fr;
-        min-width: 35;
-        min-height: 10;
-        background: $surface0;
-        border: round $surface1;
-        padding: 1;
-    }
-
-    ActivityFeed .panel-title {
-        color: $green;
-        text-style: bold;
-        margin-bottom: 1;
-    }
-
-    ActivityFeed VerticalScroll {
-        height: 1fr;
-    }
-
-    ActivityFeed .activity-line {
-        height: 2;
-        padding: 0 1;
-        margin-bottom: 1;
-    }
-
-    ActivityFeed .activity-line:nth-child(odd) {
-        background: $surface1;
-    }
-
-    ActivityFeed .activity-title {
-        color: $text;
-        text-style: bold;
-    }
-
-    ActivityFeed .activity-meta {
-        color: $subtext0;
-    }
-
-    ActivityFeed .engine-success {
-        color: $green;
-    }
-
-    ActivityFeed .engine-warning {
-        color: $yellow;
-    }
-
-    ActivityFeed .engine-error {
-        color: $red;
-    }
-
-    ActivityFeed .empty-state {
-        color: $subtext0;
-        text-align: center;
-        padding: 2;
-    }
-    """
+    # CSS movido a mocha.tcss para usar variables
 
     class ActivityAdded(Message):
         """Mensaje emitido cuando se agrega una actividad."""

@@ -18,6 +18,7 @@ from textual.worker import Worker
 
 from uif_scraper.tui.messages import (
     ActivityEvent,
+    ErrorEvent,
     ProgressUpdate,
     StateChange,
     SystemStatus,
@@ -207,6 +208,17 @@ class UIFDashboardApp(App[None]):
         # Actualizar subtítulo global según estado
         if isinstance(event, StateChange):
             self._update_subtitle(event)
+            # Actualizar estado interno
+            self._is_paused = event.state == "paused"
+            self._is_running = event.state in ("running", "paused")
+
+        # Manejar errores críticos
+        if isinstance(event, ErrorEvent) and event.is_fatal:
+            self.notify(
+                f"Error fatal: {event.error_type}",
+                title="Error",
+                severity="error",
+            )
 
         # Propagar a la pantalla actual si es DashboardScreen
         if isinstance(self.screen, DashboardScreen):
