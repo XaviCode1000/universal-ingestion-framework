@@ -118,28 +118,70 @@ class MaxRetriesExceededError(Exception):
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# CIRCUIT BREAKER SIMPLE (POR DOMINIO)
+# CIRCUIT BREAKER SIMPLE (POR DOMINIO) CON LRU
 # ═══════════════════════════════════════════════════════════════════════════════
 
 
 class DomainCircuitBreaker:
-    """Circuit breaker simple por dominio.
+    """Circuit breaker simple por dominio con LRU.
 
     Estados:
     - closed: Operación normal
     - open: Bloqueando peticiones por excesivos fallos
     - half-open: Probando recuperación
+
+    Características:
+    - LRU eviction para prevenir fugas de memoria
+    - Máximo de dominios configurables (default 1000)
     """
 
     def __init__(
         self,
         fail_threshold: int = 5,
         recovery_timeout: float = 60.0,
+        max_domains: int = 1000,
     ) -> None:
         self._fail_threshold = fail_threshold
         self._recovery_timeout = recovery_timeout
-        self._failures: dict[str, int] = {}
-        self._blocked_until: dict[str, float] = {}
+        self._max_domains = max_domains
+
+        # LRU cache usando OrderedDict
+        # El orden indica antigüedad: al final = más reciente
+        from collections import OrderedDict
+
+        self._failures: OrderedDict[str, int] = OrderedDict()
+        self._blocked_until: OrderedDict[str, float] = OrderedDict()
+
+    def _evict_if_needed(self) -> None:
+        """Evita el dominio menos reciente si alcanzamos el límite."""
+        # Limpiar dominios expirados primero
+        current_time = time.time()
+        expired = [
+            d
+            for d, blocked_until in self._blocked_until.items()
+            if blocked_until < current_time
+        ]
+        for d in expired:
+            del self._blocked_until[d]
+            if d in self._failures:
+                del self._failures[d]
+
+        # Si aún estamos lleno, eliminar el menos reciente
+        total_keys = len(self._failures) + len(self._blocked_until)
+        if total_keys >= self._max_domains:
+            # Eliminar el primer elemento (menos reciente)
+            if self._failures:
+                self._failures.popitem(last=False)
+            elif self._blocked_until:
+                self._blocked_until.popitem(last=False)
+
+    def _touch(self, domain: str) -> None:
+        """Marca el dominio como recientemente usado (para LRU)."""
+        # Mover al final si existe
+        if domain in self._failures:
+            self._failures.move_to_end(domain)
+        if domain in self._blocked_until:
+            self._blocked_until.move_to_end(domain)
 
     def can_execute(self, domain: str) -> tuple[bool, float]:
         """Verifica si se puede ejecutar una petición para el dominio.
@@ -147,14 +189,22 @@ class DomainCircuitBreaker:
         Returns:
             (puede_ejecutar, tiempo_restante)
         """
+        # Asegurar espacio si es un dominio nuevo
+        if domain not in self._failures and domain not in self._blocked_until:
+            self._evict_if_needed()
+
         if domain in self._blocked_until:
             remaining = self._blocked_until[domain] - time.time()
             if remaining > 0:
+                self._touch(domain)
                 return False, remaining
             # Timeout expirado, pasar a half-open
             self._failures[domain] = 0
             del self._blocked_until[domain]
+            self._touch(domain)
             return True, 0.0
+
+        self._touch(domain)
         return True, 0.0
 
     def record_success(self, domain: str) -> None:
@@ -162,12 +212,19 @@ class DomainCircuitBreaker:
         self._failures[domain] = 0
         if domain in self._blocked_until:
             del self._blocked_until[domain]
+        self._touch(domain)
 
     def record_failure(self, domain: str) -> None:
         """Registra fallo para el dominio."""
+        # Asegurar espacio
+        self._evict_if_needed()
+
         self._failures[domain] = self._failures.get(domain, 0) + 1
+        self._touch(domain)
+
         if self._failures[domain] >= self._fail_threshold:
             self._blocked_until[domain] = time.time() + self._recovery_timeout
+            self._touch(domain)
 
     def get_state(self, domain: str) -> str:
         """Obtiene el estado actual del circuit breaker para el dominio."""
@@ -178,6 +235,8 @@ class DomainCircuitBreaker:
         return "closed"
 
     def get_failure_count(self, domain: str) -> int:
+        """Obtiene la cantidad de fallos consecutivos para el dominio."""
+        return self._failures.get(domain, 0)
         """Obtiene la cantidad de fallos consecutivos para el dominio."""
         return self._failures.get(domain, 0)
 

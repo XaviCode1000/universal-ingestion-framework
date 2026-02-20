@@ -371,6 +371,23 @@ class ActivityFeed(Vertical):
             self.ActivityAdded(url, f"Reintento {attempt_number}", "network", "warning")
         )
 
+    def _blink_circuit_open(self) -> None:
+        """Efecto de blink rojo cuando el circuit se abre."""
+        # Solo hacer blink si tenemos widgets
+        if not hasattr(self, "_widgets"):
+            return
+
+        for widget in self._widgets:
+            if widget.display:
+                # Primer flash: rojo brillante
+                widget.styles.background = "red"
+
+                # Desvanecer después de 200ms usando animate
+                def fade() -> None:
+                    widget.styles.animate("background", value="panel", duration=0.3)
+
+                widget.set_timer(0.2, fade)
+
     def add_circuit_activity(
         self,
         domain: str,
@@ -386,13 +403,13 @@ class ActivityFeed(Vertical):
             new_state: Nuevo estado
             failure_count: Cantidad de fallos consecutivos
         """
-        now = time()
-
         # Determinar fase según el nuevo estado
         if new_state == "open":
             phase = "circuit_open"
             title = f"Circuit ABIERTO: {domain}"
             status = "error"
+            # Efecto de blink solo cuando se abre el circuito
+            self._blink_circuit_open()
         elif new_state == "half-open":
             phase = "circuit_half_open"
             title = f"Prueba {domain}"
@@ -409,7 +426,7 @@ class ActivityFeed(Vertical):
             "status": status,
             "elapsed_ms": 0,
             "size_bytes": 0,
-            "timestamp": now,
+            "timestamp": time(),
             "phase": phase,
         }
         self._buffer.appendleft(activity)
