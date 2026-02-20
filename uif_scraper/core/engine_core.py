@@ -292,7 +292,7 @@ class EngineCore:
             self.stats.pages_total_count += 1
 
     async def run(self) -> None:
-        """Ejecuta el engine principal con soporte para pause/resume."""
+        """Ejecuta el engine principal con TaskGroup para structured concurrency."""
         try:
             await self.setup()
         except RuntimeError:
@@ -311,72 +311,113 @@ class EngineCore:
             max_pages=self.config.default_workers,
             solve_cloudflare=True,
         ) as session:
-            self._page_workers = [
-                asyncio.create_task(self._page_worker(session))
-                for _ in range(self.config.default_workers)
-            ]
-            if self.extract_assets:
-                self._asset_workers = [
-                    asyncio.create_task(self._asset_worker())
-                    for _ in range(self.config.asset_workers)
-                ]
-
-            all_workers = self._page_workers + self._asset_workers
-
-            # Trackear si la misión completó naturalmente (cola vacía)
-            mission_naturally_completed = False
-
             try:
-                checks = 0
-                while not self._shutdown_event.is_set():
-                    # Verificar si está pausado
-                    if not self._pause_event.is_set():
-                        # Esperar a que se reanude
-                        await self._pause_event.wait()
+                # ✅ USAR TASKGROUP PARA STRUCTURED CONCURRENCY
+                # Esto garantiza que todos los workers terminen juntos
+                async with asyncio.TaskGroup() as tg:
+                    # Page workers
+                    for _ in range(self.config.default_workers):
+                        tg.create_task(self._page_worker(session))
 
-                    self._notify_ui()
-                    self._update_speed()
+                    # Asset workers
+                    if self.extract_assets:
+                        for _ in range(self.config.asset_workers):
+                            tg.create_task(self._asset_worker())
 
-                    if (self.url_queue.qsize() + self.asset_queue.qsize()) == 0:
-                        checks += 1
-                        if checks >= 5:
-                            # Cola vacía por 5 ciclos = misión completada naturalmente
-                            mission_naturally_completed = True
-                            self._notify_state_change(
-                                "mission_complete", reason="queue_exhausted"
-                            )
-                            break
-                    else:
-                        checks = 0
-                    await asyncio.sleep(0.5)
+                    # Monitor loop - corre en el TaskGroup también
+                    # Este task monitorea el estado y puede iniciar shutdown
+                    tg.create_task(self._monitor_loop())
 
-                # FORZAR update UI antes del join() para evitar race condition
-                # El Estado oficial pasa a ser "finalizing" mientras hace cleanup
-                if mission_naturally_completed:
-                    self._notify_state_change(
-                        "finalizing", reason="cleanup_in_progress"
-                    )
+                    # El TaskGroup espera aquí hasta que TODOS los tasks terminen
+                    # Si cualquier task lanza excepción no manejada, se cancelan todos
 
-                # Asegurar que la UI процессó el evento antes de bloquear
-                await asyncio.sleep(0.05)
-                self._notify_ui()
+            except* asyncio.CancelledError:
+                # Shutdown controlado vía _shutdown_event
+                logger.info("TaskGroup cancelled (shutdown)")
+            except* Exception as eg:
+                # ERROR CRÍTICO: Algo falló irreparablemente en un worker
+                # Esto NO debería pasar si el error handling inside funciona
+                for exc in eg.exceptions:
+                    logger.critical(f"Worker failed critically: {exc}")
 
-                await self.url_queue.join()
-                if self.extract_assets:
-                    await self.asset_queue.join()
+            # post-TaskGroup cleanup
+            self._notify_state_change("stopping", reason="mission_completed")
 
-            finally:
-                self._notify_state_change("stopping", reason="mission_completed")
-                await self._graceful_shutdown(all_workers)
-                await self.state.release_mission_lock(
-                    self.navigation.domain, os.getpid()
-                )
+            # Cleanup de recursos
+            await self._cleanup_after_taskgroup()
+
+            await self.state.release_mission_lock(self.navigation.domain, os.getpid())
 
         self._notify_state_change("stopped", reason="mission_completed")
         await self.reporter.generate_summary()
         await self.http_cache.close()
 
+    async def _monitor_loop(self) -> None:
+        """Monitor loop que corre junto con los workers.
+
+        Este task monitorea las colas y detecta cuando la misión
+        completó naturalmente.
+        """
+        checks = 0
+        while not self._shutdown_event.is_set():
+            # Verificar si está pausado
+            if not self._pause_event.is_set():
+                await self._pause_event.wait()
+
+            self._notify_ui()
+            self._update_speed()
+
+            if (self.url_queue.qsize() + self.asset_queue.qsize()) == 0:
+                checks += 1
+                if checks >= 5:
+                    # Cola vacía por 5 ciclos = misión completada naturalmente
+                    self._notify_state_change(
+                        "mission_complete", reason="queue_exhausted"
+                    )
+                    self._shutdown_event.set()  # Signal workers to stop
+                    break
+            else:
+                checks = 0
+            await asyncio.sleep(0.5)
+
+        # Before exit, ensure all queues are drained
+        self._notify_state_change("finalizing", reason="cleanup_in_progress")
+        await asyncio.sleep(0.05)
+        self._notify_ui()
+
+    async def _cleanup_after_taskgroup(self) -> None:
+        """Cleanup después de que el TaskGroup terminó."""
+        # Ensure all queue items are marked done
+        try:
+            await self.url_queue.join()
+        except Exception:
+            pass
+        try:
+            if self.extract_assets:
+                await self.asset_queue.join()
+        except Exception:
+            pass
+
+        # Persistence drainage
+        await self.data_queue.put(None)  # Signal persistence worker to stop
+        try:
+            await asyncio.wait_for(
+                self.data_queue.join(),
+                timeout=30.0,
+            )
+        except asyncio.TimeoutError:
+            logger.warning("Persistence queue drainage timed out")
+
+        # Force final flush
+        if self._data_writer:
+            await self._data_writer.close()
+
     async def _page_worker(self, session: AsyncStealthySession) -> None:
+        """Page worker con resiliencia - error handling inside.
+
+        Este worker NUNCA debe lanzar una excepción no manejada.
+        Toda excepción se maneja internamente para proteger el TaskGroup.
+        """
         while not self._shutdown_event.is_set():
             try:
                 item = await asyncio.wait_for(
@@ -390,29 +431,47 @@ class EngineCore:
                 break
 
             url: str = item
+
+            # ✅ RESILIENCIA: Wrapper seguro que captura TODO
+            await self._safe_process_page(session, url)
+
+    async def _safe_process_page(self, session: AsyncStealthySession, url: str) -> None:
+        """Wrapper seguro para procesamiento de página.
+
+        Cualquier excepción aquí NO sale del worker.
+        Patrón: Error Handling Inside.
+        """
+        try:
             if not self.circuit_breaker.should_allow(self.navigation.domain):
                 await self.url_queue.put(url)
-                self.url_queue.task_done()
                 await asyncio.sleep(1)
-                continue
+                return
 
+            async with self.semaphore:
+                # Adaptive jitter
+                jitter = (os.urandom(1)[0] / 255) * DEFAULT_JITTER_MAX
+                await asyncio.sleep(self.config.request_delay + jitter)
+                await self._process_page(session, url)
+
+        except asyncio.CancelledError:
+            # ✅ Propagar CancelledError para shutdown limpio
+            await self.state.update_status(url, MigrationStatus.PENDING, immediate=True)
+            raise
+
+        except Exception as e:
+            # ✅ ERROR HANDLING INSIDE - No propaga
+            logger.error(f"[Worker] Processing failed for {url}: {e}")
+
+        finally:
+            # ✅ SIEMPRE marcar como done
             try:
-                async with self.semaphore:
-                    # Adaptive jitter
-                    jitter = (os.urandom(1)[0] / 255) * DEFAULT_JITTER_MAX
-                    await asyncio.sleep(self.config.request_delay + jitter)
-                    await self._process_page(session, url)
-            except asyncio.CancelledError:
-                await self.state.update_status(
-                    url, MigrationStatus.PENDING, immediate=True
-                )
-                raise
-            except Exception as e:
-                logger.error(f"Error processing {url}: {e}")
-            finally:
                 self.url_queue.task_done()
+            except ValueError:
+                # Edge case: task_done llamado dos veces
+                pass
 
     async def _asset_worker(self) -> None:
+        """Asset worker con resiliencia - error handling inside."""
         while not self._shutdown_event.is_set():
             try:
                 item = await asyncio.wait_for(
@@ -426,15 +485,27 @@ class EngineCore:
                 break
 
             url: str = item
+
+            # ✅ RESILIENCIA: Wrapper seguro
+            await self._safe_download_asset(url)
+
+    async def _safe_download_asset(self, asset_url: str) -> None:
+        """Wrapper seguro para descarga de assets.
+
+        Cualquier excepción aquí NO sale del worker.
+        """
+        try:
+            await self._download_asset(asset_url)
+        except asyncio.CancelledError:
+            await self.state.update_status(asset_url, MigrationStatus.PENDING)
+            raise
+        except Exception as e:
+            logger.error(f"[Worker] Asset download failed for {asset_url}: {e}")
+        finally:
             try:
-                await self._download_asset(url)
-            except asyncio.CancelledError:
-                await self.state.update_status(url, MigrationStatus.PENDING)
-                raise
-            except Exception as e:
-                logger.error(f"Error downloading {url}: {e}")
-            finally:
                 self.asset_queue.task_done()
+            except ValueError:
+                pass
 
     async def _process_page(self, session: AsyncStealthySession, url: str) -> None:
         """Procesa una página: fetch, extract, save, notify."""
