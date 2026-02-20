@@ -197,21 +197,34 @@ class DataWriter:
         return True
 
     async def flush(self) -> None:
-        """Fuerza escritura del buffer a disco."""
+        """Fuerza escritura del buffer a disco.
+
+        OPTIMIZACIÓN ZERO-COPY: Usa el patrón "Swap & Drop" para evitar
+        copias O(n) del buffer. En lugar de copiar la lista o hacer clear(),
+        intercambiamos la referencia del buffer por uno nuevo y vacío.
+        """
         if not self._buffer and not self._failed_buffer:
             return
 
         now = time.time()
 
-        # Escribir items válidos
-        if self._buffer and self._main_file:
+        # ✅ ZERO-COPY: Swap buffers en lugar de copiar o clear()
+        # Esto es O(1) en lugar de O(n) que toma .clear()
+        # El buffer "viejo" se pasa a escribir, uno nuevo vacío toma su lugar
+        buffer_to_write = self._buffer
+        self._buffer = deque()  # Nueva instancia vacía - O(1)
+
+        failed_buffer_to_write = self._failed_buffer
+        self._failed_buffer = deque()  # Nueva instancia vacía - O(1)
+
+        # Escribir items válidos (el buffer está "desconectado" - seguro iterar)
+        if buffer_to_write and self._main_file:
             await self._write_atomic(
                 self._main_file,
-                self._buffer,
+                buffer_to_write,
             )
-            self._total_written += len(self._buffer)
-            count = len(self._buffer)
-            self._buffer.clear()
+            self._total_written += len(buffer_to_write)
+            count = len(buffer_to_write)
 
             # Notificar evento
             if self._on_flush:
@@ -225,12 +238,11 @@ class DataWriter:
                 self._on_flush(event)
 
         # Escribir items fallidos
-        if self._failed_buffer and self._failed_file:
+        if failed_buffer_to_write and self._failed_file:
             await self._write_atomic(
                 self._failed_file,
-                self._failed_buffer,
+                failed_buffer_to_write,
             )
-            self._failed_buffer.clear()
 
         self._last_flush_time = now
         logger.debug(f"Flushed to {self._main_file}")
@@ -306,15 +318,23 @@ class DataWriter:
         logger.info(f"DataWriter closed. Total written: {self._total_written}")
 
     async def _force_flush(self) -> None:
-        """Fuerza el flush de todo el buffer sin condiciones."""
-        if self._buffer:
-            await self._write_atomic(self._main_file, self._buffer)
-            self._total_written += len(self._buffer)
-            self._buffer.clear()
+        """Fuerza el flush de todo el buffer sin condiciones.
 
-        if self._failed_buffer:
-            await self._write_atomic(self._failed_file, self._failed_buffer)
-            self._failed_buffer.clear()
+        OPTIMIZACIÓN ZERO-COPY: Usa el patrón "Swap & Drop".
+        """
+        # ✅ ZERO-COPY: Swap buffers
+        buffer_to_write = self._buffer
+        self._buffer = deque()
+
+        failed_buffer_to_write = self._failed_buffer
+        self._failed_buffer = deque()
+
+        if buffer_to_write and self._main_file:
+            await self._write_atomic(self._main_file, buffer_to_write)
+            self._total_written += len(buffer_to_write)
+
+        if failed_buffer_to_write and self._failed_file:
+            await self._write_atomic(self._failed_file, failed_buffer_to_write)
 
     @property
     def stats(self) -> dict[str, Any]:
